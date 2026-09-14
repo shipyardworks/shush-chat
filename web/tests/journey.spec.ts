@@ -15,6 +15,21 @@ const arrive = async (browser: Browser): Promise<Page> => {
   return page;
 };
 
+/**
+ * Freezes the "what are you into?" ticker for this page.
+ *
+ * A tile there is a real, clickable button the whole time it streams past -- pausing it here is
+ * only about giving a scripted click a still target to land on, the same reason a real person
+ * hovers before clicking one. It changes nothing about what is being tested: selection state,
+ * not motion.
+ */
+const freezeTicker = (page: Page) =>
+  page.evaluate(() => {
+    document
+      .querySelectorAll<HTMLElement>(".marquee-track")
+      .forEach((el) => (el.style.animationPlayState = "paused"));
+  });
+
 /** Requests live behind an icon in the header now, not a permanent section of the sidebar. */
 const openRequests = async (page: Page) => {
   await page.locator("#requestsButton").click();
@@ -29,13 +44,12 @@ const matchThem = async (a: Page, b: Page) => {
     await expect(page.locator("[data-testid=interest]").first()).toBeVisible();
   }
   const id = await a.locator("[data-testid=interest]").first().getAttribute("data-interest-id");
+  for (const page of [a, b]) await freezeTicker(page);
   // Selected, not toggled. A returning visitor arrives with their last interests already on,
   // and clicking blindly turns the shared one off again.
   for (const page of [a, b]) {
     const tile = page.locator(`[data-interest-id="${id}"]`);
-    if ((await tile.getAttribute("aria-pressed")) !== "true") {
-      await tile.click();
-    }
+    if ((await tile.getAttribute("aria-pressed")) !== "true") await tile.click({ force: true });
   }
   await a.waitForTimeout(600);
   await a.locator("#findSomeone").click();
@@ -158,23 +172,34 @@ test("unread counts, and removing a friend makes them matchable again", async ({
   await matchThem(alice, bob);
 });
 
-test("every interest is in one scrollable list, not five behind a toggle", async ({ browser }) => {
+test("everything not yet chosen streams in one line, and picking moves it to the top", async ({
+  browser,
+}) => {
   const page = await arrive(browser);
   const tiles = page.locator("[data-testid=interest]");
   await expect(tiles.first()).toBeVisible();
   const count = await tiles.count();
   expect(count).toBeGreaterThan(5);
 
-  // The list fits in a fixed-height box and scrolls rather than expanding the page --
-  // "Show more" is gone, and there is nothing to click to reveal the rest.
+  // One streaming line, not a wall of tiles behind a "show more" -- the strip is wider than the
+  // box holding it, which is what asks it to scroll rather than wrap onto a second row.
   const overflows = await page
-    .locator("#interestTiles")
-    .evaluate((node) => node.scrollHeight > node.clientHeight);
+    .locator("#interestTicker")
+    .evaluate((node) => node.scrollWidth > node.clientWidth);
   expect(overflows).toBe(true);
   await expect(page.locator("#showOthers")).toHaveCount(0);
+
+  // Picking one takes it out of the stream and onto the row that does not move.
+  await freezeTicker(page);
+  const id = await tiles.first().getAttribute("data-interest-id");
+  await page.locator(`[data-interest-id="${id}"]`).click({ force: true });
+  await expect(page.locator(`[data-interest-id="${id}"]`)).toHaveAttribute("aria-pressed", "true");
+  await expect(
+    page.locator("#interestTicker").locator(`[data-interest-id="${id}"]`),
+  ).toHaveCount(0);
 });
 
-test("typing a tag and pressing Enter adds it as an ordinary interest", async ({ browser }) => {
+test("typing a tag and pressing Enter adds a local interest, normalised", async ({ browser }) => {
   const page = await arrive(browser);
   // #displayName is visible as soon as the session exists, which is before the interest
   // catalogue has finished loading -- counting tiles here without waiting for the first one
@@ -182,22 +207,29 @@ test("typing a tag and pressing Enter adds it as an ordinary interest", async ({
   await expect(page.locator("[data-testid=interest]").first()).toBeVisible();
   const before = await page.locator("[data-testid=interest]").count();
 
-  // A tag nobody has typed before, in this process or an earlier run of this test: the
-  // interests table is real, shared, and permanent, so "Competitive Origami" from the last
-  // time this suite ran is still sitting in it -- creating it again is a no-op by design (the
-  // dedupe test above already proves that) and would leave this count unchanged rather than +1.
-  const label = `Competitive Origami ${Date.now()}`;
-  await page.locator("#addInterestInput").fill(label);
+  // Mixed case and a space on the way in -- one lowercase word with neither is what should
+  // land, the same shape every curated tile already has.
+  const raw = `Competitive Origami ${Date.now()}`;
+  const normalised = raw.toLowerCase().replace(/[^a-z0-9]+/g, "");
+  await page.locator("#addInterestInput").fill(raw);
   await page.locator("#addInterestInput").press("Enter");
 
-  const created = page.locator("[data-interest-id]", { hasText: label });
+  const created = page.locator("[data-testid=interest]", { hasText: normalised });
   await expect(created).toBeVisible();
-  // The same element, the same class, the same everything a curated tile gets -- there is no
-  // second kind of tile to look different or carry an "x" of its own.
-  await expect(created).toHaveAttribute("data-testid", "interest");
   await expect(created).toHaveAttribute("aria-pressed", "true");
   await expect(page.locator("[data-testid=interest]")).toHaveCount(before + 1);
-
-  // The box is empty again and ready for the next one -- no separate "Add" button was clicked.
   await expect(page.locator("#addInterestInput")).toHaveValue("");
+
+  // Kept by this browser, not the server -- a reload still has it.
+  await page.reload();
+  await expect(page.locator("[data-testid=interest]").first()).toBeVisible();
+  await expect(page.locator("[data-testid=interest]", { hasText: normalised })).toBeVisible();
+
+  // A local-only tag has nowhere to go but gone: deselecting it removes it, on this load and
+  // the next.
+  await page.locator("[data-testid=interest]", { hasText: normalised }).click({ force: true });
+  await expect(page.locator("[data-testid=interest]", { hasText: normalised })).toHaveCount(0);
+  await page.reload();
+  await expect(page.locator("[data-testid=interest]").first()).toBeVisible();
+  await expect(page.locator("[data-testid=interest]", { hasText: normalised })).toHaveCount(0);
 });

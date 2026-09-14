@@ -27,6 +27,7 @@ Generated 2026-09-14 from 16 tables.
 | `V6` | cors origins | yes |
 | `V7` | message interactions | yes |
 | `V8` | custom interests | yes |
+| `V9` | lowercase interest labels | yes |
 
 ---
 

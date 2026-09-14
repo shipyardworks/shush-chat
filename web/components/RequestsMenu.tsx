@@ -59,8 +59,11 @@ export const RequestsMenu = ({
         onClick={() => setOpen((current) => !current)}
         className="btn-ghost relative grid h-9 w-9 place-items-center rounded-full p-0"
       >
-        <svg viewBox="0 0 24 24" className="h-[18px] w-[18px]" fill="none" stroke="currentColor" strokeWidth="1.8">
-          <path d="M4 6.5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H8l-4 3.5z" strokeLinejoin="round" />
+        {/* A bell, not a chat bubble -- a request waiting to be answered is a notification,
+            not a conversation, and the old icon read as a second inbox. */}
+        <svg viewBox="0 0 24 24" className="h-[18px] w-[18px]" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M6 9a6 6 0 0 1 12 0c0 4 1.5 5.5 2 6H4c.5-.5 2-2 2-6Z" />
+          <path d="M10 19a2 2 0 0 0 4 0" />
         </svg>
         {requests.length > 0 && (
           <span

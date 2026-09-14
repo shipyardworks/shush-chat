@@ -18,6 +18,62 @@ import type {
 } from "./types";
 
 const DEVICE_TOKEN = "shush.deviceToken";
+const SELECTED_INTERESTS = "shush.selectedInterests";
+const CUSTOM_INTERESTS = "shush.customInterests";
+
+/**
+ * What you had picked, kept by this browser rather than the server.
+ *
+ * <p>Matching still needs the ids sent with every `find`, so this changes nothing about how
+ * matching works -- it only changes where "what did I pick last time" is remembered from, which
+ * used to be a server-side guess (recent history) and is now simply what was still on screen.
+ */
+const rememberSelected = (ids: number[]) => {
+  try {
+    localStorage.setItem(SELECTED_INTERESTS, JSON.stringify(ids));
+  } catch {
+    // Private browsing, or the quota is gone. Selection just will not survive a reload.
+  }
+};
+
+const rememberedSelected = (): number[] | null => {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(SELECTED_INTERESTS) ?? "null");
+    return Array.isArray(parsed) ? parsed.filter((one) => typeof one === "number") : null;
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * A tag typed into "add interest", kept in this browser and nowhere else.
+ *
+ * <p>Matching needs a shared vocabulary (aim.md 4.3): a tag only one person has typed cannot
+ * pair anyone by construction, so there is nothing to gain by sending it anywhere, and every
+ * reason not to -- it never leaves this device, and the id space (negative, timestamp-derived)
+ * cannot collide with a real interest's id even by accident.
+ */
+const rememberCustomInterests = (list: Interest[]) => {
+  try {
+    localStorage.setItem(CUSTOM_INTERESTS, JSON.stringify(list));
+  } catch {
+    // Private browsing, or the quota is gone. The tag survives this tab and no further.
+  }
+};
+
+const rememberedCustomInterests = (): Interest[] => {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(CUSTOM_INTERESTS) ?? "null");
+    return Array.isArray(parsed)
+      ? parsed.filter(
+          (one): one is Interest =>
+            one && typeof one.id === "number" && typeof one.label === "string",
+        )
+      : [];
+  } catch {
+    return [];
+  }
+};
 
 const remember = (token: string) => {
   try {
@@ -54,6 +110,7 @@ export const useShush = () => {
     all: [],
   });
   const [selected, setSelected] = useState<number[]>([]);
+  const [customInterests, setCustomInterests] = useState<Interest[]>([]);
   const [patience, setPatience] = useState(5);
   const [findStatus, setFindStatus] = useState("");
   const [typing, setTyping] = useState(false);
@@ -439,7 +496,23 @@ export const useShush = () => {
 
     const catalogue = await api.interests();
     setInterests({ suggested: catalogue.suggested, all: catalogue.all });
-    setSelected(catalogue.fromHistory ? catalogue.suggested.map((i) => i.id) : []);
+    // This browser's own memory of what was picked, filtered to ids that still exist, wins over
+    // the server's guess -- a returning visitor is walking back into a room they left, not
+    // filling a form out again.
+    const known = new Set([...catalogue.suggested, ...catalogue.all].map((interest) => interest.id));
+    const savedSelection = rememberedSelected()?.filter((id) => known.has(id)) ?? [];
+    // A local-only tag is always selected -- there is no unselected-but-remembered state for
+    // one, since it has nowhere else to live once it is off.
+    const savedCustom = rememberedCustomInterests();
+    setCustomInterests(savedCustom);
+    setSelected([
+      ...(savedSelection.length > 0
+        ? savedSelection
+        : catalogue.fromHistory
+          ? catalogue.suggested.map((i) => i.id)
+          : []),
+      ...savedCustom.map((interest) => interest.id),
+    ]);
 
     await new Promise<void>((resolve) => {
       const ws = new WebSocket(socketUrl(next.jwt));
@@ -545,8 +618,11 @@ export const useShush = () => {
 
   const findSomeone = useCallback(async () => {
     setFindStatus("Looking…");
-    await api.saveInterests(selected);
-    send({ type: "find", interestIds: selected, patience });
+    // A local-only tag has no row on the server to save against or match on -- sending its
+    // negative id to either call would just be a request the server has no way to satisfy.
+    const realIds = selected.filter((id) => id > 0);
+    await api.saveInterests(realIds);
+    send({ type: "find", interestIds: realIds, patience });
     if (hintTimer.current) clearTimeout(hintTimer.current);
     // Matching skips anyone already a friend, so with a few friends and nobody else waiting it
     // looks exactly like a broken matcher. Say so rather than spin forever.
@@ -746,24 +822,85 @@ export const useShush = () => {
   );
 
   /**
-   * Adds a tag to the shared list and selects it. It is a real interest the moment it exists --
-   * the server hands back the same row for the same tag no matter who asks, which is what lets
-   * two people who typed it separately be matched on it later.
+   * Attaches an email and password to the identity this browser already has. The response is a
+   * fresh session for the same account -- same id, same name, same friends -- not a new one, so
+   * it replaces what is held here rather than being layered on top of it.
    */
-  const addInterest = useCallback(async (label: string) => {
-    const trimmed = label.trim();
-    if (!trimmed) return;
-    try {
-      const interest = await api.createInterest(trimmed);
-      setInterests((current) =>
-        current.all.some((one) => one.id === interest.id)
-          ? current
-          : { ...current, all: [...current.all, interest] },
-      );
-      setSelected((current) => (current.includes(interest.id) ? current : [...current, interest.id]));
-    } catch {
-      // Not worth a modal over. The tile simply does not appear, and typing it again retries.
+  const saveAccount = useCallback(async (email: string, password: string) => {
+    const response = await api.signup(email, password);
+    if (!response.ok) {
+      const body = (await response.json().catch(() => null)) as { message?: string } | null;
+      return { ok: false, message: body?.message ?? "Could not save the account." };
     }
+    const next = (await response.json()) as Session;
+    setBearer(next.jwt);
+    setSession(next);
+    meRef.current = next.user.id;
+    return { ok: true, message: "Saved. Nothing reset — same name, same friends." };
+  }, []);
+
+  /**
+   * Forgets this browser. The account itself is untouched server-side (`aim.md`'s anonymous
+   * identity was never at risk of being deleted by this) -- only the device token that lets this
+   * browser resume it is invalidated, so the next load starts a fresh anonymous identity.
+   */
+  const logout = useCallback(async () => {
+    const token = remembered();
+    try {
+      await api.logout(token ?? undefined);
+    } catch {
+      // Best effort. The browser forgets its own token regardless of whether the server heard.
+    }
+    try {
+      localStorage.removeItem(DEVICE_TOKEN);
+      localStorage.removeItem(SELECTED_INTERESTS);
+      localStorage.removeItem(CUSTOM_INTERESTS);
+    } catch {
+      // Private browsing, or the quota is gone -- nothing left to clear either way.
+    }
+    window.location.reload();
+  }, []);
+
+  /** Sets selection and remembers it in this browser in the same step, so the two never drift. */
+  const updateSelected = useCallback((next: number[]) => {
+    setSelected(next);
+    rememberSelected(next);
+  }, []);
+
+  /**
+   * Adds a tag to this browser's own list and selects it. Nothing here calls the server: a tag
+   * only one person typed cannot match anyone by construction, so there is nothing to gain from
+   * a shared row and every reason to keep it off one -- it is remembered by this browser alone,
+   * under an id that cannot collide with a real interest's because real ids are never negative.
+   */
+  const addInterest = useCallback((label: string) => {
+    if (!label) return;
+    setCustomInterests((current) => {
+      if (current.some((one) => one.label === label)) return current;
+      const interest: Interest = { id: -Date.now(), label };
+      const next = [...current, interest];
+      rememberCustomInterests(next);
+      setSelected((selection) => {
+        const nextSelection = [...selection, interest.id];
+        rememberSelected(nextSelection);
+        return nextSelection;
+      });
+      return next;
+    });
+  }, []);
+
+  /** The only way a local-only tag goes away: it has no unselected state to fall back to. */
+  const removeCustomInterest = useCallback((id: number) => {
+    setCustomInterests((current) => {
+      const next = current.filter((interest) => interest.id !== id);
+      rememberCustomInterests(next);
+      return next;
+    });
+    setSelected((current) => {
+      const next = current.filter((one) => one !== id);
+      rememberSelected(next);
+      return next;
+    });
   }, []);
 
   const goHome = useCallback(() => {
@@ -807,8 +944,10 @@ export const useShush = () => {
     conversations: strangerConversations,
     interests,
     selected,
-    setSelected,
+    setSelected: updateSelected,
+    customInterests,
     addInterest,
+    removeCustomInterest,
     patience,
     setPatience,
     findStatus,
@@ -837,6 +976,8 @@ export const useShush = () => {
     leave,
     askToKeep,
     removeFriend,
+    saveAccount,
+    logout,
     goHome,
     reloadFriends,
     reloadRequests,

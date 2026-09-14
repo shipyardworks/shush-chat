@@ -85,7 +85,7 @@ export const MessageList = ({
       id="messages"
       ref={list}
       onScroll={onScroll}
-      className="flex min-h-0 flex-1 flex-col gap-[3px] overflow-y-auto p-6"
+      className="scroll-elegant flex min-h-0 flex-1 flex-col gap-[3px] overflow-y-auto p-6"
     >
       {items.map((item, index) => {
         if (item.kind === "day") {

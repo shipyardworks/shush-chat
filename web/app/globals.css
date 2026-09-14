@@ -111,18 +111,63 @@ html[data-theme="light"] body {
 .rise { animation: rise 0.16s ease-out; }
 
 /*
-  A thin, theme-matched scrollbar for the panels that scroll inside the app shell rather than
-  the page itself -- the browser's default bar is a thick, high-contrast rectangle that looks
-  like it belongs to a different, older product than everything drawn around it.
+  A thin, theme-matched scrollbar everywhere in the app rather than the browser's default bar --
+  a thick, high-contrast rectangle that looks like it belongs to a different, older product than
+  everything drawn around it. This used to be an opt-in class added to each scrolling panel one
+  at a time, which is how one got missed (the message list) and stood out as the odd one out.
+  A global rule cannot be forgotten on the next scrolling panel either.
 */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-line) transparent;
+}
+*::-webkit-scrollbar { width: 7px; height: 7px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb {
+  background-color: var(--color-line);
+  border-radius: 999px;
+}
+*::-webkit-scrollbar-thumb:hover { background-color: var(--color-faint); }
+
+/* Kept as a no-op alias: existing markup still names it, and it costs nothing to honour. */
 .scroll-elegant {
   scrollbar-width: thin;
   scrollbar-color: var(--color-line) transparent;
 }
-.scroll-elegant::-webkit-scrollbar { width: 7px; height: 7px; }
-.scroll-elegant::-webkit-scrollbar-track { background: transparent; }
-.scroll-elegant::-webkit-scrollbar-thumb {
-  background-color: var(--color-line);
-  border-radius: 999px;
+
+/*
+  The interest strip on the setup screen streams what is not yet chosen, one line, rather than
+  folding thirty tiles into a wall behind a "show more". It is real scroll (overflow-x: auto),
+  driven a frame at a time in JS rather than a CSS transform, because a transform-driven marquee
+  cannot also be dragged -- there is nothing for a pointer to grab that scrollLeft doesn't already
+  give for free. `.marquee-track` is kept as a selector: it carries no animation of its own any
+  more, and its `animationPlayState` inline style is read as a plain pause flag by the loop that
+  drives the scroll, purely so it still pauses under the pointer -- and so a still target exists
+  to click, the same reason a real person hovers before clicking one.
+*/
+.marquee-fade {
+  -webkit-mask-image: linear-gradient(to right, transparent, black 28px, black calc(100% - 28px), transparent);
+  mask-image: linear-gradient(to right, transparent, black 28px, black calc(100% - 28px), transparent);
 }
-.scroll-elegant::-webkit-scrollbar-thumb:hover { background-color: var(--color-faint); }
+.marquee-track {
+  scrollbar-width: none;
+}
+.marquee-track::-webkit-scrollbar {
+  display: none;
+}
+
+/*
+  Chrome (and most Chromium browsers) force a light, theme-ignorant background onto a field the
+  moment it offers to autofill it -- which is how the email box on "save your account" ended up
+  white while the password box next to it stayed dark. The box-shadow trick is the only reliable
+  override: the background-color itself cannot be changed once autofill has painted it.
+*/
+.field:-webkit-autofill,
+.field:-webkit-autofill:hover,
+.field:-webkit-autofill:focus {
+  -webkit-text-fill-color: var(--color-body);
+  caret-color: var(--color-body);
+  -webkit-box-shadow: 0 0 0 1000px var(--color-surface-2) inset;
+  box-shadow: 0 0 0 1000px var(--color-surface-2) inset;
+  transition: background-color 9999s ease-in-out 0s;
+}

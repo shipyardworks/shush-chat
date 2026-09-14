@@ -1,6 +1,6 @@
 export type Interest = { id: number; label: string };
 
-export type User = { id: string; displayName: string; anonymous: boolean };
+export type User = { id: string; displayName: string; anonymous: boolean; email: string | null };
 
 export type Session = { token?: string; jwt: string; user: User };
 

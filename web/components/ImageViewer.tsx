@@ -2,6 +2,7 @@
 
 import { useEffect } from "react";
 import { mediaUrl } from "@/lib/api";
+import { ChatImage } from "./ChatImage";
 
 /**
  * A photo, full size, on a dark ground -- the thing every chat app does when you tap an image,
@@ -45,13 +46,16 @@ export const ImageViewer = ({ mediaKey, onClose }: { mediaKey: string; onClose: 
           Open
         </a>
       </div>
-      <div className="grid min-h-0 flex-1 place-items-center p-4">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          alt="shared image"
-          src={mediaUrl(mediaKey)}
+      {/* flex with min-h-0 and overflow-hidden, not grid: a grid row is sized to its content,
+          so max-h-full on the image resolved against a track the image had already stretched
+          -- the same bug the send-side preview fixed, showing up here because this is a second
+          place that draws one image at full size rather than the same component doing it. */}
+      <div className="flex min-h-0 flex-1 items-center justify-center overflow-hidden p-4">
+        <ChatImage
+          mediaKey={mediaKey}
           onClick={(event) => event.stopPropagation()}
           className="max-h-full max-w-full rounded-lg object-contain"
+          style={{ maxHeight: "100%", maxWidth: "100%" }}
         />
       </div>
     </div>

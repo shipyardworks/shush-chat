@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import { api } from "@/lib/api";
 import type { Conversation, Friend, Session } from "@/lib/types";
 import { Avatar } from "./Avatar";
 
@@ -16,6 +15,8 @@ export const Sidebar = ({
   onOpenFriend,
   onOpenConversation,
   onFindSomeone,
+  onSaveAccount,
+  onLogout,
 }: {
   session: Session;
   friends: Friend[];
@@ -25,6 +26,8 @@ export const Sidebar = ({
   onOpenFriend: (friend: Friend) => void;
   onOpenConversation: (conversation: Conversation) => void;
   onFindSomeone: () => void;
+  onSaveAccount: (email: string, password: string) => Promise<{ ok: boolean; message: string }>;
+  onLogout: () => void;
 }) => {
   const [tab, setTab] = useState<Tab>("chats");
   const [email, setEmail] = useState("");
@@ -32,12 +35,7 @@ export const Sidebar = ({
   const [saveStatus, setSaveStatus] = useState("");
 
   const save = async () => {
-    const response = await api.signup(email, password);
-    if (!response.ok) {
-      setSaveStatus(((await response.json()) as { message: string }).message);
-      return;
-    }
-    setSaveStatus("Saved. Nothing reset — same name, same friends.");
+    setSaveStatus((await onSaveAccount(email, password)).message);
   };
 
   return (
@@ -193,7 +191,7 @@ export const Sidebar = ({
         )}
       </div>
 
-      {session.user.anonymous && (
+      {session.user.anonymous ? (
         <div
           id="saveBox"
           className="flex-none border-t p-4"
@@ -201,7 +199,7 @@ export const Sidebar = ({
         >
           <h2 className="section-label">Save your account</h2>
           <p className="mb-2.5 text-[13px]" style={{ color: "var(--color-faint)" }}>
-            This browser is the only way back in.
+            This exists only in this browser. Clear it, and it is gone — save it to keep it safe.
           </p>
           <div className="flex flex-col gap-2">
             <input
@@ -229,6 +227,24 @@ export const Sidebar = ({
               </span>
             )}
           </div>
+        </div>
+      ) : (
+        <div
+          id="accountBox"
+          className="flex-none border-t p-4"
+          style={{ borderColor: "var(--color-line-soft)" }}
+        >
+          <h2 className="section-label">Signed in</h2>
+          <p
+            id="myEmail"
+            className="mb-2.5 truncate text-[13px]"
+            style={{ color: "var(--color-body)" }}
+          >
+            {session.user.email}
+          </p>
+          <button id="logout" type="button" className="btn-ghost w-full" onClick={onLogout}>
+            Log out
+          </button>
         </div>
       )}
     </aside>

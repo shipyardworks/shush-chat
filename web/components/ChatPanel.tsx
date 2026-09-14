@@ -1,6 +1,7 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type { ChatItem, Message } from "@/lib/types";
 import type { Peer } from "@/lib/useShush";
 import { Avatar } from "./Avatar";
@@ -27,7 +28,6 @@ export const ChatPanel = ({
   onDeleteForEveryone,
   onHideForMe,
   onOpenImage,
-  onFindSomeone,
   onOpenCamera,
   setupPanel,
 }: {
@@ -51,11 +51,11 @@ export const ChatPanel = ({
   onDeleteForEveryone: (message: Message) => void;
   onHideForMe: (message: Message) => void;
   onOpenImage: (mediaKey: string) => void;
-  onFindSomeone: () => void;
   onOpenCamera: () => void;
   setupPanel: React.ReactNode;
 }) => {
   const [draft, setDraft] = useState("");
+  const [picking, setPicking] = useState(false);
   const file = useRef<HTMLInputElement>(null);
   const composer = useRef<HTMLInputElement>(null);
 
@@ -63,6 +63,27 @@ export const ChatPanel = ({
     onSend(draft);
     setDraft("");
   };
+
+  // A new match closes it on its own -- there is nothing left to pick for once one has been
+  // found, and leaving it open would show the modal floating over somebody else's conversation.
+  useEffect(() => {
+    if (!ended) setPicking(false);
+  }, [ended]);
+
+  // Opening a conversation from the sidebar is a click on someone's name, not on the composer --
+  // without this, saying something back takes a second click nobody should have to make.
+  useEffect(() => {
+    if (!ended) composer.current?.focus();
+  }, [peer.userId, ended]);
+
+  useEffect(() => {
+    if (!picking) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setPicking(false);
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [picking]);
 
   return (
     <div id="chat" className="flex min-h-0 flex-1 flex-col">
@@ -157,28 +178,26 @@ export const ChatPanel = ({
       )}
 
       {ended ? (
-        /* No composer, because there is nothing to send into. Straight to the next
-           conversation instead of leaving somebody staring at a dead thread -- the card is
-           here rather than a link to it, so finding the next person is one click. */
+        /* No composer, because there is nothing to send into. Picking who's next used to be
+           inlined right here, which put a whole scrolling picker in the middle of a finished
+           conversation -- a page seguing into a different screen without ever saying so. A
+           modal says so: the thread is still there underneath it, waiting, if this is closed. */
         <div
           id="endedPanel"
-          className="border-t px-5 py-4"
+          className="flex flex-wrap items-center gap-3 border-t px-5 py-4"
           style={{ borderColor: "var(--color-line-soft)" }}
         >
-          <div className="mb-3 flex flex-wrap items-center gap-3">
-            <span className="text-[13px]" style={{ color: "var(--color-muted)" }}>
-              This conversation is over.
-            </span>
-            <button
-              id="findSomeoneNext"
-              type="button"
-              className="btn-primary"
-              onClick={onFindSomeone}
-            >
-              Find someone new
-            </button>
-          </div>
-          {setupPanel}
+          <span className="text-[13px]" style={{ color: "var(--color-muted)" }}>
+            This conversation is over.
+          </span>
+          <button
+            id="findSomeoneNext"
+            type="button"
+            className="btn-primary"
+            onClick={() => setPicking(true)}
+          >
+            Find someone new
+          </button>
         </div>
       ) : (
       <div
@@ -261,6 +280,33 @@ export const ChatPanel = ({
         </button>
       </div>
       )}
+
+      {picking &&
+        createPortal(
+          <div
+            id="findSomeoneModal"
+            className="fixed inset-0 z-50 grid place-items-center p-5 backdrop-blur-[3px]"
+            style={{ backgroundColor: "rgb(4 5 9 / 0.62)" }}
+            onClick={(event) => {
+              if (event.target === event.currentTarget) setPicking(false);
+            }}
+          >
+            <div role="dialog" aria-modal="true" className="panel rise w-full max-w-[620px] p-7">
+              <div className="mb-1 flex justify-end">
+                <button
+                  type="button"
+                  aria-label="Close"
+                  className="btn-ghost px-3"
+                  onClick={() => setPicking(false)}
+                >
+                  ✕
+                </button>
+              </div>
+              {setupPanel}
+            </div>
+          </div>,
+          document.body,
+        )}
     </div>
   );
 };

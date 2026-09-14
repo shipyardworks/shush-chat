@@ -35,12 +35,21 @@ public class InterestService {
     /**
      * A first-time visitor sees the five most popular interests; a returning one sees their
      * own, already selected (pre-plan.md 3, step 2).
+     *
+     * <p>Ad hoc tags (popularity 0 -- nothing here is ever reweighted after creation, so that is
+     * every tag somebody typed rather than one of the curated 28) are filtered out of both
+     * lists. The client stopped sending them here at all; this is what stops the ones already
+     * on the row from an earlier build showing up for browsing or as a stale suggestion.
      */
     @Transactional(readOnly = true)
     public Suggestions suggestFor(UUID userId) {
-        List<Interest> all = interests.findAllByOrderByPopularityDescIdAsc();
+        List<Interest> all = interests.findAllByOrderByPopularityDescIdAsc().stream()
+                .filter(interest -> interest.getPopularity() > 0)
+                .toList();
 
-        List<Interest> suggested = userId == null ? List.of() : interests.findLastUsedBy(userId);
+        List<Interest> suggested = userId == null ? List.of() : interests.findLastUsedBy(userId).stream()
+                .filter(interest -> interest.getPopularity() > 0)
+                .toList();
         boolean returning = !suggested.isEmpty();
         if (!returning) {
             suggested = all.stream().limit(DEFAULT_TILE_COUNT).toList();

@@ -596,6 +596,14 @@ typed it be told "you both like xabc" and actually mean it. `id` moved from a ha
 `smallint` to an identity column for this; nothing else about the matching pipeline changed,
 because a tag someone typed an hour ago and one seeded on day one are the same kind of row.
 
+**Which interests are pre-selected comes from this browser, not the server's guess.** The setup
+screen used to open with your most recent interests turned on because the server said so
+(`fromHistory`). It still can, for a first visit, but from the moment you pick anything this
+browser remembers the exact selection itself and that wins on the next visit — "what did I have
+on" is a fact about a screen you looked at, not something worth a round trip to relearn.
+`PUT /api/interests/mine` still exists and still runs on every `find`, because matching still
+needs the ids on the server; only where the *pre-selection* comes from moved.
+
 **History of everything, strangers included.** `pre-plan.md` says a stranger conversation
 nobody asked to keep does not survive its ending, and the retention job deleted it an hour
 later. The owner asked for a history list covering every conversation, so the purge now only

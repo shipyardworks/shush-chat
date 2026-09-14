@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Interest } from "@/lib/types";
 
 const PATIENCE = [
@@ -10,11 +10,150 @@ const PATIENCE = [
   { seconds: 0, label: "Forever" },
 ];
 
+/** Roughly what the old CSS animation moved at, now driven a frame at a time. */
+const PIXELS_PER_SECOND = 42;
+
+/**
+ * One tile, one look, everywhere it appears -- chosen, streaming past, or freshly typed.
+ *
+ * <p>{@code hidden} renders a second, inert copy of the same button for the streaming strip's
+ * seamless loop: real content, not a screenshot of it, but not something a test or a screen
+ * reader should count twice. It still calls the same handler, so whichever copy is on screen at
+ * the moment somebody clicks, it does the same thing.
+ */
+const Tile = ({
+  interest,
+  on,
+  onClick,
+  hidden = false,
+}: {
+  interest: Interest;
+  on: boolean;
+  onClick: () => void;
+  hidden?: boolean;
+}) => (
+  <button
+    type="button"
+    {...(hidden ? { "aria-hidden": true, tabIndex: -1 } : { "data-testid": "interest" })}
+    data-interest-id={hidden ? undefined : interest.id}
+    aria-pressed={on}
+    onClick={onClick}
+    className={`shrink-0 whitespace-nowrap ${on ? "btn-primary" : "btn"}`}
+  >
+    {interest.label}
+  </button>
+);
+
+/**
+ * Everything not yet chosen, streamed past in one line rather than piled into a grid.
+ *
+ * <p>This is real horizontal scroll, not a transform: the track holds the list twice back to
+ * back and a frame loop nudges `scrollLeft` forward, wrapping by exactly half the track's width
+ * once it has scrolled a full copy -- which is invisible because the second copy is identical to
+ * the first. Because it is real scroll, it can also be dragged, which auto-scroll alone cannot
+ * offer -- something that has already streamed past is not gone, it is one drag away.
+ */
+const Ticker = ({ items, onToggle }: { items: Interest[]; onToggle: (id: number) => void }) => {
+  const track = useRef<HTMLDivElement>(null);
+  const dragging = useRef(false);
+  const dragMoved = useRef(false);
+  const dragStartX = useRef(0);
+  const dragStartScroll = useRef(0);
+
+  useEffect(() => {
+    const node = track.current;
+    if (!node) return;
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+
+    let frame = 0;
+    let last: number | null = null;
+    const tick = (now: number) => {
+      frame = requestAnimationFrame(tick);
+      const elapsed = last === null ? 0 : now - last;
+      last = now;
+      // The pause flag, and dragging, both leave scrollLeft exactly where they found it.
+      if (dragging.current || node.style.animationPlayState === "paused") return;
+      const half = node.scrollWidth / 2;
+      if (half <= node.clientWidth) return;
+      node.scrollLeft += (elapsed / 1000) * PIXELS_PER_SECOND;
+      if (node.scrollLeft >= half) node.scrollLeft -= half;
+    };
+    frame = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frame);
+    // Re-measures against the current content every time the list of what still streams changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [items.length]);
+
+  // Only a mouse drags by grabbing -- touch and a trackpad already get this natively from
+  // overflow-x: auto. No pointer capture: the swipe-to-reply gesture on a message bubble
+  // proves the same plain bubbling-plus-onPointerLeave shape already holds up under a
+  // scripted `force: true` click, and capture is exactly the thing that stopped one arriving
+  // -- retargeting is for a drag surface with nothing clickable on it, not a row of buttons.
+  const onPointerDown = (event: React.PointerEvent) => {
+    if (event.pointerType !== "mouse") return;
+    dragging.current = true;
+    dragMoved.current = false;
+    dragStartX.current = event.clientX;
+    dragStartScroll.current = track.current?.scrollLeft ?? 0;
+  };
+  const onPointerMove = (event: React.PointerEvent) => {
+    if (!dragging.current || !track.current) return;
+    const dx = event.clientX - dragStartX.current;
+    if (Math.abs(dx) > 4) dragMoved.current = true;
+    track.current.scrollLeft = dragStartScroll.current - dx;
+  };
+  const endDrag = () => {
+    dragging.current = false;
+  };
+  // A drag that moved is not a click on whatever the pointer happened to end up over.
+  const clickThrough = (id: number) => () => {
+    if (!dragMoved.current) onToggle(id);
+  };
+
+  return (
+    <div
+      id="interestTicker"
+      ref={track}
+      className="marquee-fade marquee-track flex items-center gap-2 overflow-x-auto overflow-y-hidden py-0.5 select-none"
+      style={{ cursor: "grab" }}
+      onMouseEnter={() => {
+        if (track.current) track.current.style.animationPlayState = "paused";
+      }}
+      onMouseLeave={() => {
+        if (track.current) track.current.style.animationPlayState = "";
+      }}
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={endDrag}
+      onPointerLeave={endDrag}
+      onPointerCancel={endDrag}
+    >
+      {items.map((interest) => (
+        <Tile key={interest.id} interest={interest} on={false} onClick={clickThrough(interest.id)} />
+      ))}
+      {items.map((interest) => (
+        <Tile
+          key={`echo-${interest.id}`}
+          interest={interest}
+          on={false}
+          hidden
+          onClick={clickThrough(interest.id)}
+        />
+      ))}
+    </div>
+  );
+};
+
+/** Lowercase, one run of letters and digits, nothing else -- the same shape a curated tile has. */
+const normaliseTag = (label: string) => label.toLowerCase().replace(/[^a-z0-9]+/g, "");
+
 export const SetupPanel = ({
   interests,
   selected,
   setSelected,
+  customInterests,
   onAddInterest,
+  onRemoveInterest,
   patience,
   setPatience,
   findStatus,
@@ -24,7 +163,10 @@ export const SetupPanel = ({
   interests: { suggested: Interest[]; all: Interest[] };
   selected: number[];
   setSelected: (next: number[]) => void;
+  /** Kept in this browser only -- never sent anywhere, never part of the streaming strip. */
+  customInterests: Interest[];
   onAddInterest: (label: string) => void;
+  onRemoveInterest: (id: number) => void;
   patience: number;
   setPatience: (next: number) => void;
   findStatus: string;
@@ -35,18 +177,28 @@ export const SetupPanel = ({
   const [draft, setDraft] = useState("");
 
   // Suggestions first, then everything else -- the useful ones are what a returning visitor
-  // sees without scrolling.
+  // sees at the front of the strip.
   const ordered = [
     ...interests.suggested,
     ...interests.all.filter((one) => !interests.suggested.some((s) => s.id === one.id)),
   ];
+  const chosen = [...ordered.filter((interest) => selected.includes(interest.id)), ...customInterests];
+  const rest = ordered.filter((interest) => !selected.includes(interest.id));
+  const customIds = new Set(customInterests.map((interest) => interest.id));
 
-  const toggle = (id: number) =>
+  const toggle = (id: number) => {
+    if (customIds.has(id)) {
+      // A local-only tag has nowhere to go back to -- deselecting it is removing it.
+      onRemoveInterest(id);
+      return;
+    }
     setSelected(selected.includes(id) ? selected.filter((one) => one !== id) : [...selected, id]);
+  };
 
   const submitDraft = () => {
-    if (!draft.trim()) return;
-    onAddInterest(draft);
+    const tag = normaliseTag(draft);
+    if (!tag) return;
+    onAddInterest(tag);
     setDraft("");
   };
 
@@ -55,49 +207,42 @@ export const SetupPanel = ({
       <div>
         <h2 className="section-label">What are you into?</h2>
         {/*
-          One list, one look, one way to make a tile: a typed tag becomes a real interest the
-          moment it is created, so there is nothing left to style differently. Everything that
-          does not fit scrolls rather than folding behind a Show more -- picking is the part of
-          this screen that matters, and a fixed-height scroller keeps the rest of the page still
-          while that happens.
+          Chosen sits on top and never scrolls -- it is the answer, not the question, and it is
+          short enough to just wrap. Everything still available streams underneath it, one line,
+          so thirty options never turn into a wall of tiles: pick one and it moves up here,
+          unclick it and it goes back to streaming past below.
         */}
-        <div
-          id="interestTiles"
-          className="scroll-elegant flex max-h-[220px] flex-wrap content-start gap-2 overflow-y-auto pr-1"
-        >
-          {ordered.map((interest) => {
-            const on = selected.includes(interest.id);
-            return (
-              <button
-                key={interest.id}
-                type="button"
-                data-interest-id={interest.id}
-                data-testid="interest"
-                aria-pressed={on}
-                onClick={() => toggle(interest.id)}
-                className={on ? "btn-primary" : "btn"}
-              >
-                {interest.label}
-              </button>
-            );
-          })}
+        <div id="interestTiles" className="flex flex-col gap-2.5">
+          <div className="flex flex-wrap items-center gap-2">
+            {chosen.map((interest) => (
+              <Tile key={interest.id} interest={interest} on onClick={() => toggle(interest.id)} />
+            ))}
+            {chosen.length === 0 && (
+              <span className="text-[13px]" style={{ color: "var(--color-faint)" }}>
+                Pick a few below, or type your own —
+              </span>
+            )}
+            {/* The same shape as a tile, so adding one does not read as a different feature --
+                just an empty slot waiting for a word. Enter creates and selects it in one step.
+                autoComplete is off on purpose: a bare text input with no name of its own is
+                exactly what Chrome fills with whatever was typed into it last, and the strip of
+                other people's old test tags in that dropdown had nothing to do with this field. */}
+            <input
+              id="addInterestInput"
+              type="text"
+              autoComplete="off"
+              placeholder="Add interest"
+              maxLength={40}
+              value={draft}
+              onChange={(event) => setDraft(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") submitDraft();
+              }}
+              className="field w-[168px] px-4 py-2"
+            />
+          </div>
 
-          {/* The same shape as a tile, so adding one does not read as a different feature --
-              just an empty slot waiting for a word. Enter creates and selects it in one step. */}
-          <input
-            id="addInterestInput"
-            type="text"
-            placeholder="+ Something else"
-            maxLength={40}
-            value={draft}
-            onChange={(event) => setDraft(event.target.value)}
-            onKeyDown={(event) => {
-              // Enter only, as asked -- clicking away with a half-typed tag in the box must
-              // not silently create it.
-              if (event.key === "Enter") submitDraft();
-            }}
-            className="field w-[168px] px-4 py-2"
-          />
+          {rest.length > 0 && <Ticker items={rest} onToggle={toggle} />}
         </div>
       </div>
 

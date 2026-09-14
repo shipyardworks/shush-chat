@@ -13,14 +13,30 @@ const arrive = async (browser: Browser): Promise<Page> => {
   return page;
 };
 
+/**
+ * Freezes the "what are you into?" ticker for this page.
+ *
+ * A tile there is a real, clickable button the whole time it streams past -- pausing it here is
+ * only about giving a scripted click a still target to land on, the same reason a real person
+ * hovers before clicking one. It changes nothing about what is being tested: selection state,
+ * not motion.
+ */
+const freezeTicker = (page: Page) =>
+  page.evaluate(() => {
+    document
+      .querySelectorAll<HTMLElement>(".marquee-track")
+      .forEach((el) => (el.style.animationPlayState = "paused"));
+  });
+
 const matchThem = async (a: Page, b: Page) => {
   for (const page of [a, b]) {
     await expect(page.locator("[data-testid=interest]").first()).toBeVisible();
   }
   const id = await a.locator("[data-testid=interest]").first().getAttribute("data-interest-id");
+  for (const page of [a, b]) await freezeTicker(page);
   for (const page of [a, b]) {
     const tile = page.locator(`[data-interest-id="${id}"]`);
-    if ((await tile.getAttribute("aria-pressed")) !== "true") await tile.click();
+    if ((await tile.getAttribute("aria-pressed")) !== "true") await tile.click({ force: true });
   }
   await a.waitForTimeout(600);
   await a.locator("#findSomeone").click();
@@ -66,18 +82,28 @@ test("leaving reaches both people and closes the conversation", async ({ browser
   }
 });
 
-test("an ended conversation offers the way to the next one", async ({ browser }) => {
+test("an ended conversation offers the way to the next one, as a modal over it", async ({
+  browser,
+}) => {
   const alice = await arrive(browser);
   const bob = await arrive(browser);
   await matchThem(alice, bob);
   await alice.locator("#leave").click();
   await expect(bob.locator("#endedPanel")).toBeVisible();
 
-  // The card is right there rather than a link to it: one click to the next person.
-  await expect(bob.locator("#endedPanel [data-testid=interest]").first()).toBeVisible();
-  await expect(bob.locator("#endedPanel #findSomeone")).toBeVisible();
+  // Nothing but the fact and a button -- the picker itself is not here, so the ended thread
+  // never grows a scrolling picker of its own the way it used to.
+  await expect(bob.locator("#endedPanel [data-testid=interest]")).toHaveCount(0);
+  await expect(bob.locator("#findSomeoneModal")).toHaveCount(0);
+
+  // One click opens it as a modal over the finished conversation, which is still there
+  // underneath: closing without picking anyone leaves it exactly as it was.
   await bob.locator("#findSomeoneNext").click();
-  await expect(bob.locator("#findSomeone")).toBeVisible();
+  await expect(bob.locator("#findSomeoneModal [data-testid=interest]").first()).toBeVisible();
+  await expect(bob.locator("#findSomeoneModal #findSomeone")).toBeVisible();
+  await bob.keyboard.press("Escape");
+  await expect(bob.locator("#findSomeoneModal")).toHaveCount(0);
+  await expect(bob.locator("#endedPanel")).toBeVisible();
 });
 
 test("the conversation is headed with their name, not 'A stranger'", async ({ browser }) => {
@@ -139,39 +165,35 @@ test("a photo opens full size", async ({ browser }) => {
   await expect(bob.locator("#imageViewer")).toHaveCount(0);
 });
 
-test("a custom tag is shared, not local, and two people typing it are matched on it", async ({
+test("a custom tag stays in this browser -- normalised, never shared, gone when removed", async ({
   browser,
 }) => {
   const alice = await arrive(browser);
   const bob = await arrive(browser);
 
-  // Nothing on this screen claims otherwise any more -- a tag typed here is exactly as shared
-  // as a curated one, so there is nothing here to say it is not.
-  await expect(alice.locator("text=Only you see these")).toHaveCount(0);
-  await expect(alice.locator("text=not used for matching")).toHaveCount(0);
-
-  // A different spelling of the same tag, from someone who has never seen alice's tile.
-  await alice.locator("#addInterestInput").fill("Xylophone Repair");
+  const raw = "Xylophone Repair";
+  const normalised = "xylophonerepair";
+  await alice.locator("#addInterestInput").fill(raw);
   await alice.locator("#addInterestInput").press("Enter");
-  await bob.locator("#addInterestInput").fill("  xylophone repair  ");
-  await bob.locator("#addInterestInput").press("Enter");
 
-  const aliceTile = alice.locator("[data-interest-id]", { hasText: "Xylophone Repair" });
-  const bobTile = bob.locator("[data-interest-id]", { hasText: "Xylophone Repair" });
+  const aliceTile = alice.locator("[data-testid=interest]", { hasText: normalised });
   await expect(aliceTile).toBeVisible();
-  await expect(bobTile).toBeVisible();
-  expect(await aliceTile.getAttribute("data-interest-id")).toBe(
-    await bobTile.getAttribute("data-interest-id"),
-  );
+  await expect(aliceTile).toHaveAttribute("aria-pressed", "true");
 
-  // Selected the moment it is created, on both sides, and that shared id is exactly what
-  // matching needs -- so the two of them find each other on the strength of it alone.
-  await alice.waitForTimeout(400);
-  await alice.locator("#findSomeone").click();
-  await bob.locator("#findSomeone").click();
-  await expect(alice.locator("#chat")).toBeVisible();
-  await expect(bob.locator("#chat")).toBeVisible();
-  await expect(alice.locator("#chatSub")).toContainText(/you both like/i);
+  // Bob never typed it and nothing sent it to him -- it does not exist on his screen at all.
+  await expect(bob.locator("[data-testid=interest]", { hasText: normalised })).toHaveCount(0);
+
+  // This browser remembers it...
+  await alice.reload();
+  await expect(alice.locator("[data-testid=interest]").first()).toBeVisible();
+  await expect(alice.locator("[data-testid=interest]", { hasText: normalised })).toBeVisible();
+
+  // ...until it is removed, which is the only way a tag with nowhere else to live goes away.
+  await alice.locator("[data-testid=interest]", { hasText: normalised }).click({ force: true });
+  await expect(alice.locator("[data-testid=interest]", { hasText: normalised })).toHaveCount(0);
+  await alice.reload();
+  await expect(alice.locator("[data-testid=interest]").first()).toBeVisible();
+  await expect(alice.locator("[data-testid=interest]", { hasText: normalised })).toHaveCount(0);
 });
 
 test("there is no way to shuffle a name", async ({ browser }) => {

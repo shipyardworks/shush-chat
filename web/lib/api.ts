@@ -41,19 +41,14 @@ export const api = {
   signup: (email: string, password: string) =>
     request("/api/auth/signup", { method: "POST", body: JSON.stringify({ email, password }) }),
 
+  logout: (token?: string) =>
+    request("/api/auth/logout", { method: "POST", body: JSON.stringify({ token }) }),
+
   interests: () =>
     json<{ suggested: Interest[]; all: Interest[]; fromHistory: boolean }>("/api/interests"),
 
   saveInterests: (interestIds: number[]) =>
     request("/api/interests/mine", { method: "PUT", body: JSON.stringify({ interestIds }) }),
-
-  /**
-   * Finds the shared row for a tag, or creates it. Not a local note: the point is that someone
-   * else typing the same thing lands on this exact row, which is what makes matching on it
-   * possible at all.
-   */
-  createInterest: (label: string) =>
-    json<Interest>("/api/interests", { method: "POST", body: JSON.stringify({ label }) }),
 
   shuffleName: () => request("/api/me/shuffle-name", { method: "POST" }),
 

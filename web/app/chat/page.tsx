@@ -31,7 +31,9 @@ export default function Chat() {
       interests={shush.interests}
       selected={shush.selected}
       setSelected={shush.setSelected}
+      customInterests={shush.customInterests}
       onAddInterest={shush.addInterest}
+      onRemoveInterest={shush.removeCustomInterest}
       patience={shush.patience}
       setPatience={shush.setPatience}
       findStatus={shush.findStatus}
@@ -118,6 +120,8 @@ export default function Chat() {
             onOpenFriend={shush.openFriend}
             onOpenConversation={shush.openConversationFromHistory}
             onFindSomeone={shush.goHome}
+            onSaveAccount={shush.saveAccount}
+            onLogout={shush.logout}
           />
         )}
 
@@ -169,7 +173,6 @@ export default function Chat() {
               onDeleteForEveryone={shush.deleteForEveryone}
               onHideForMe={shush.hideForMe}
               onOpenImage={setViewing}
-              onFindSomeone={shush.goHome}
               onOpenCamera={() => setCameraOpen(true)}
               setupPanel={setup(true)}
             />

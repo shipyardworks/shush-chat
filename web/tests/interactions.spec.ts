@@ -13,6 +13,21 @@ const arrive = async (browser: Browser): Promise<Page> => {
   return page;
 };
 
+/**
+ * Freezes the "what are you into?" ticker for this page.
+ *
+ * A tile there is a real, clickable button the whole time it streams past -- pausing it here is
+ * only about giving a scripted click a still target to land on, the same reason a real person
+ * hovers before clicking one. It changes nothing about what is being tested: selection state,
+ * not motion.
+ */
+const freezeTicker = (page: Page) =>
+  page.evaluate(() => {
+    document
+      .querySelectorAll<HTMLElement>(".marquee-track")
+      .forEach((el) => (el.style.animationPlayState = "paused"));
+  });
+
 /** Requests live behind an icon in the header, not a permanent section of the sidebar. */
 const openRequests = async (page: Page) => {
   await page.locator("#requestsButton").click();
@@ -27,9 +42,10 @@ const matchThem = async (a: Page, b: Page) => {
     await expect(page.locator("[data-testid=interest]").first()).toBeVisible();
   }
   const id = await a.locator("[data-testid=interest]").first().getAttribute("data-interest-id");
+  for (const page of [a, b]) await freezeTicker(page);
   for (const page of [a, b]) {
     const tile = page.locator(`[data-interest-id="${id}"]`);
-    if ((await tile.getAttribute("aria-pressed")) !== "true") await tile.click();
+    if ((await tile.getAttribute("aria-pressed")) !== "true") await tile.click({ force: true });
   }
   await a.waitForTimeout(600);
   await a.locator("#findSomeone").click();

@@ -1,9 +1,9 @@
 "use client";
 
 import { useLayoutEffect, useRef, useState } from "react";
-import { mediaUrl } from "@/lib/api";
 import { clockTime } from "@/lib/time";
 import type { Delivery, Message } from "@/lib/types";
+import { ChatImage } from "./ChatImage";
 import { EmojiPicker } from "./EmojiPicker";
 import { Ticks } from "./Ticks";
 
@@ -258,11 +258,8 @@ export const MessageBubble = ({
             className="relative block cursor-zoom-in overflow-hidden"
             style={{ borderRadius: 13 }}
           >
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              alt="shared image"
-              src={mediaUrl(message.mediaKey!)}
-              draggable={false}
+            <ChatImage
+              mediaKey={message.mediaKey!}
               className="block max-h-[340px] min-w-[120px] object-cover"
               style={{ maxWidth: 300 }}
             />
