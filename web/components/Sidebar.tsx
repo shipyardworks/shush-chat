@@ -2,32 +2,31 @@
 
 import { useState } from "react";
 import { api } from "@/lib/api";
-import type { Conversation, Friend, FriendRequest, Session } from "@/lib/types";
+import type { Conversation, Friend, Session } from "@/lib/types";
 import { Avatar } from "./Avatar";
+
+type Tab = "chats" | "friends";
 
 export const Sidebar = ({
   session,
   friends,
-  requests,
   conversations,
   openConversationId,
   chatOnScreen,
   onOpenFriend,
   onOpenConversation,
   onFindSomeone,
-  onRefresh,
 }: {
   session: Session;
   friends: Friend[];
-  requests: FriendRequest[];
   conversations: Conversation[];
   openConversationId: string | null;
   chatOnScreen: boolean;
   onOpenFriend: (friend: Friend) => void;
   onOpenConversation: (conversation: Conversation) => void;
   onFindSomeone: () => void;
-  onRefresh: () => Promise<void>;
 }) => {
+  const [tab, setTab] = useState<Tab>("chats");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [saveStatus, setSaveStatus] = useState("");
@@ -44,187 +43,165 @@ export const Sidebar = ({
   return (
     <aside
       id="sidebar"
-      className="flex min-h-0 flex-col gap-5 overflow-y-auto border-r p-4"
+      className="flex min-h-0 flex-col border-r"
       style={{ borderColor: "var(--color-line-soft)" }}
     >
-      <div>
-        <h2 className="section-label flex items-center gap-2">
-          Requests
-          {requests.length > 0 && (
-            <span
-              data-testid="requestCount"
-              className="rounded-full px-1.5 py-px text-[10px] font-bold tracking-normal text-white"
-              style={{ background: "linear-gradient(135deg, var(--color-brand), var(--color-brand-2))" }}
-            >
-              {requests.length}
-            </span>
-          )}
-        </h2>
-        <ul id="requests" className="m-0 flex list-none flex-col gap-1 p-0">
-          {requests.map((request) => (
-            <li
-              key={request.id}
-              data-testid="request"
-              className="flex flex-col gap-2 rounded-xl border p-3"
-              style={{ borderColor: "var(--color-line)", backgroundColor: "var(--color-surface-2)" }}
-            >
-              {/* Their name. "Someone would like to keep you" is a question nobody can
-                  answer -- the app knows who it means and should say so. */}
-              <p className="m-0 text-[13px]">
-                <strong>{request.fromDisplayName ?? "Someone"}</strong> would like to keep you.
-              </p>
-              <div className="flex flex-wrap items-center gap-2">
-                <button
-                  type="button"
-                  className="btn-primary px-3 py-1.5 text-[13px]"
-                  onClick={async () => {
-                    await api.acceptRequest(request.id);
-                    await onRefresh();
-                  }}
-                >
-                  Accept
-                </button>
-                <button
-                  type="button"
-                  className="btn-ghost px-3 py-1.5 text-[13px]"
-                  onClick={async () => {
-                    await api.declineRequest(request.id);
-                    await onRefresh();
-                  }}
-                >
-                  Decline
-                </button>
-              </div>
-            </li>
-          ))}
-        </ul>
-        {requests.length === 0 && (
-          <p id="noRequests" className="mt-0.5 text-[13px]" style={{ color: "var(--color-faint)" }}>
-            Nobody has asked to keep you yet.
-          </p>
-        )}
+      <div className="flex-none p-4 pb-3">
+        {/* A segmented control, not two independent buttons: exactly one of these is ever
+            true, and looking like a single switch says that at a glance. */}
+        <div
+          className="grid grid-cols-2 gap-1 rounded-full p-1"
+          style={{ backgroundColor: "var(--color-surface-2)" }}
+        >
+          <button
+            id="tabChats"
+            type="button"
+            aria-pressed={tab === "chats"}
+            onClick={() => setTab("chats")}
+            className="rounded-full py-1.5 text-sm font-medium transition"
+            style={
+              tab === "chats"
+                ? {
+                    background: "linear-gradient(135deg, var(--color-brand), var(--color-brand-2))",
+                    color: "#fff",
+                  }
+                : { color: "var(--color-muted)" }
+            }
+          >
+            Chats
+          </button>
+          <button
+            id="tabFriends"
+            type="button"
+            aria-pressed={tab === "friends"}
+            onClick={() => setTab("friends")}
+            className="rounded-full py-1.5 text-sm font-medium transition"
+            style={
+              tab === "friends"
+                ? {
+                    background: "linear-gradient(135deg, var(--color-brand), var(--color-brand-2))",
+                    color: "#fff",
+                  }
+                : { color: "var(--color-muted)" }
+            }
+          >
+            Friends
+          </button>
+        </div>
+
+        <button
+          id="newChat"
+          type="button"
+          className="btn-primary mt-3 w-full"
+          onClick={onFindSomeone}
+        >
+          Find someone new
+        </button>
       </div>
 
-      <div>
-        <h2 className="section-label">Friends</h2>
-        <ul id="friends" className="m-0 flex list-none flex-col gap-1 p-0">
-          {friends.map((friend) => {
-            // Hidden only while that conversation is actually on screen. "The open one" is not
-            // the same as "the last one opened" -- after going home the thread is still
-            // selected, and hiding the badge on that basis hides the count you came back for.
-            const onScreenNow = chatOnScreen && friend.conversationId === openConversationId;
-            return (
-              <li key={friend.userId}>
-                <button
-                  type="button"
-                  data-testid="friend"
-                  aria-current={friend.conversationId === openConversationId}
-                  onClick={() => onOpenFriend(friend)}
-                  className="flex w-full items-center gap-2.5 rounded-xl border border-transparent p-2 text-left transition hover:border-[var(--color-line-soft)] hover:bg-[var(--color-surface-2)] aria-[current=true]:border-[var(--color-brand)] aria-[current=true]:bg-[var(--color-surface-2)]"
-                >
-                  <Avatar id={friend.userId} name={friend.displayName} online={friend.online} />
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate font-semibold">
-                      {friend.displayName ?? "Someone"}
-                    </span>
-                    <span className="block text-xs" style={{ color: "var(--color-faint)" }}>
-                      {friend.online ? "Online" : "Offline"}
-                    </span>
-                  </span>
-                  {friend.unreadCount > 0 && !onScreenNow && (
-                    <span
-                      data-testid="unread"
-                      className="grid h-5 min-w-5 flex-none place-items-center rounded-full px-1.5 text-[11px] font-bold text-white"
-                      style={{
-                        background:
-                          "linear-gradient(135deg, var(--color-brand), var(--color-brand-2))",
-                      }}
-                    >
-                      {friend.unreadCount > 99 ? "99+" : friend.unreadCount}
-                    </span>
-                  )}
-                </button>
-              </li>
-            );
-          })}
-        </ul>
-        {friends.length === 0 && (
-          <p id="noFriends" className="mt-0.5 text-[13px]" style={{ color: "var(--color-faint)" }}>
-            Nobody yet. Keep someone you enjoyed talking to.
-          </p>
-        )}
-      </div>
-
-      <div>
-        <h2 className="section-label">Chats</h2>
-        <ul id="chats" className="m-0 flex list-none flex-col gap-1 p-0">
-          {conversations.map((conversation) => {
-            const onScreenNow = chatOnScreen && conversation.id === openConversationId;
-            return (
-              <li key={conversation.id}>
-                <button
-                  type="button"
-                  data-testid="chat"
-                  data-conversation-id={conversation.id}
-                  aria-current={conversation.id === openConversationId}
-                  onClick={() => onOpenConversation(conversation)}
-                  className="flex w-full items-center gap-2.5 rounded-xl border border-transparent p-2 text-left transition hover:border-[var(--color-line-soft)] hover:bg-[var(--color-surface-2)] aria-[current=true]:border-[var(--color-brand)] aria-[current=true]:bg-[var(--color-surface-2)]"
-                >
-                  <Avatar id={conversation.peerId} name={conversation.peerName} />
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate font-semibold">
-                      {conversation.peerName ?? "Someone"}
-                    </span>
-                    <span
-                      className="block truncate text-xs"
-                      style={{ color: "var(--color-faint)" }}
-                    >
-                      {conversation.lastMessage
-                        ? `${conversation.lastFromMe ? "You: " : ""}${conversation.lastMessage}`
-                        : conversation.kind === "friend"
-                          ? "Friend"
+      {/* Only this scrolls. The tabs above and the account box below stay put -- a list that
+          is any length should never be able to push "Save your account" off the bottom. */}
+      <div className="scroll-elegant min-h-0 flex-1 overflow-y-auto px-4">
+        {tab === "chats" ? (
+          <ul id="chats" className="m-0 flex list-none flex-col gap-1 p-0">
+            {conversations.map((conversation) => {
+              const onScreenNow = chatOnScreen && conversation.id === openConversationId;
+              return (
+                <li key={conversation.id}>
+                  <button
+                    type="button"
+                    data-testid="chat"
+                    data-conversation-id={conversation.id}
+                    aria-current={conversation.id === openConversationId}
+                    onClick={() => onOpenConversation(conversation)}
+                    className="flex w-full items-center gap-2.5 rounded-xl border border-transparent p-2 text-left transition hover:border-[var(--color-line-soft)] hover:bg-[var(--color-surface-2)] aria-[current=true]:border-[var(--color-brand)] aria-[current=true]:bg-[var(--color-surface-2)]"
+                  >
+                    <Avatar id={conversation.peerId} name={conversation.peerName} />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate font-semibold">
+                        {conversation.peerName ?? "Someone"}
+                      </span>
+                      <span className="block truncate text-xs" style={{ color: "var(--color-faint)" }}>
+                        {conversation.lastMessage
+                          ? `${conversation.lastFromMe ? "You: " : ""}${conversation.lastMessage}`
                           : "Nothing said yet"}
+                      </span>
                     </span>
-                  </span>
-                  {conversation.unreadCount > 0 && !onScreenNow && (
-                    <span
-                      data-testid="chatUnread"
-                      className="grid h-5 min-w-5 flex-none place-items-center rounded-full px-1.5 text-[11px] font-bold text-white"
-                      style={{
-                        background:
-                          "linear-gradient(135deg, var(--color-brand), var(--color-brand-2))",
-                      }}
-                    >
-                      {conversation.unreadCount > 99 ? "99+" : conversation.unreadCount}
+                    {conversation.unreadCount > 0 && !onScreenNow && (
+                      <span
+                        data-testid="chatUnread"
+                        className="grid h-5 min-w-5 flex-none place-items-center rounded-full px-1.5 text-[11px] font-bold text-white"
+                        style={{ background: "linear-gradient(135deg, var(--color-brand), var(--color-brand-2))" }}
+                      >
+                        {conversation.unreadCount > 99 ? "99+" : conversation.unreadCount}
+                      </span>
+                    )}
+                  </button>
+                </li>
+              );
+            })}
+            {conversations.length === 0 && (
+              <p id="noChats" className="mt-2 text-[13px]" style={{ color: "var(--color-faint)" }}>
+                Nothing yet. Every conversation shows up here, friend or stranger.
+              </p>
+            )}
+          </ul>
+        ) : (
+          <ul id="friends" className="m-0 flex list-none flex-col gap-1 p-0">
+            {friends.map((friend) => {
+              // Hidden only while that conversation is actually on screen. "The open one" is
+              // not the same as "the last one opened" -- after going home the thread is still
+              // selected, and hiding the badge on that basis hides the count you came back for.
+              const onScreenNow = chatOnScreen && friend.conversationId === openConversationId;
+              return (
+                <li key={friend.userId}>
+                  <button
+                    type="button"
+                    data-testid="friend"
+                    aria-current={friend.conversationId === openConversationId}
+                    onClick={() => onOpenFriend(friend)}
+                    className="flex w-full items-center gap-2.5 rounded-xl border border-transparent p-2 text-left transition hover:border-[var(--color-line-soft)] hover:bg-[var(--color-surface-2)] aria-[current=true]:border-[var(--color-brand)] aria-[current=true]:bg-[var(--color-surface-2)]"
+                  >
+                    <Avatar id={friend.userId} name={friend.displayName} online={friend.online} />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate font-semibold">
+                        {friend.displayName ?? "Someone"}
+                      </span>
+                      <span className="block text-xs" style={{ color: "var(--color-faint)" }}>
+                        {friend.online ? "Online" : "Offline"}
+                      </span>
                     </span>
-                  )}
-                </button>
-              </li>
-            );
-          })}
-        </ul>
-        {conversations.length === 0 && (
-          <p id="noChats" className="mt-0.5 text-[13px]" style={{ color: "var(--color-faint)" }}>
-            Nothing yet. Every conversation you have shows up here, friend or stranger.
-          </p>
+                    {friend.unreadCount > 0 && !onScreenNow && (
+                      <span
+                        data-testid="unread"
+                        className="grid h-5 min-w-5 flex-none place-items-center rounded-full px-1.5 text-[11px] font-bold text-white"
+                        style={{ background: "linear-gradient(135deg, var(--color-brand), var(--color-brand-2))" }}
+                      >
+                        {friend.unreadCount > 99 ? "99+" : friend.unreadCount}
+                      </span>
+                    )}
+                  </button>
+                </li>
+              );
+            })}
+            {friends.length === 0 && (
+              <p id="noFriends" className="mt-2 text-[13px]" style={{ color: "var(--color-faint)" }}>
+                Nobody yet. Keep someone you enjoyed talking to.
+              </p>
+            )}
+          </ul>
         )}
       </div>
-
-      <button id="newChat" type="button" className="btn-primary w-full" onClick={onFindSomeone}>
-        Find someone new
-      </button>
 
       {session.user.anonymous && (
-        /* Pushed to the bottom: the least urgent thing here and the most permanent, so it
-           should not sit between the friends list and the button people came for. */
         <div
           id="saveBox"
-          className="mt-auto border-t pt-4"
+          className="flex-none border-t p-4"
           style={{ borderColor: "var(--color-line-soft)" }}
         >
           <h2 className="section-label">Save your account</h2>
           <p className="mb-2.5 text-[13px]" style={{ color: "var(--color-faint)" }}>
-            Only this browser connects you to this account. Clear it and your friends are gone.
+            This browser is the only way back in.
           </p>
           <div className="flex flex-col gap-2">
             <input

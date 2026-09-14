@@ -13,6 +13,15 @@ const arrive = async (browser: Browser): Promise<Page> => {
   return page;
 };
 
+/** Requests live behind an icon in the header, not a permanent section of the sidebar. */
+const openRequests = async (page: Page) => {
+  await page.locator("#requestsButton").click();
+};
+
+const openTab = async (page: Page, tab: "chats" | "friends") => {
+  await page.locator(tab === "chats" ? "#tabChats" : "#tabFriends").click();
+};
+
 const matchThem = async (a: Page, b: Page) => {
   for (const page of [a, b]) {
     await expect(page.locator("[data-testid=interest]").first()).toBeVisible();
@@ -261,7 +270,9 @@ test("every conversation is history, friends or not", async ({ browser }) => {
   await bob.locator("#home").click();
   await expect(bob.locator("[data-testid=chat]")).toHaveCount(1);
   await expect(bob.locator("[data-testid=chat]").first()).toContainText("we never became friends");
+  await openTab(bob, "friends");
   await expect(bob.locator("[data-testid=friend]")).toHaveCount(0);
+  await openTab(bob, "chats");
 
   await bob.locator("[data-testid=chat]").first().click();
   await expect(bob.locator("#messages")).toContainText("we never became friends");
@@ -274,7 +285,10 @@ test("removing a friend leaves them in the chat list", async ({ browser }) => {
   await say(alice, "keeping you");
 
   await alice.locator("#addFriend").click();
+  await openRequests(bob);
   await bob.getByRole("button", { name: "Accept" }).click();
+  await bob.keyboard.press("Escape");
+  await openTab(bob, "friends");
   await expect(bob.locator("[data-testid=friend]")).toHaveCount(1);
 
   await bob.locator("#chatAvatar").click();
@@ -282,6 +296,7 @@ test("removing a friend leaves them in the chat list", async ({ browser }) => {
 
   await expect(bob.locator("[data-testid=friend]")).toHaveCount(0);
   // Not gone -- moved. The friendship ended, the history did not.
+  await openTab(bob, "chats");
   await expect(bob.locator("[data-testid=chat]")).toHaveCount(1);
   await expect(bob.locator("#messages")).toContainText("keeping you");
   await expect(bob.locator("#addFriend")).toBeVisible();

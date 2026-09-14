@@ -9,6 +9,7 @@ import { CameraCapture } from "@/components/CameraCapture";
 import { ChatPanel } from "@/components/ChatPanel";
 import { ImageViewer } from "@/components/ImageViewer";
 import { ProfileDialog, type ProfileTarget } from "@/components/ProfileDialog";
+import { RequestsMenu } from "@/components/RequestsMenu";
 import { SetupPanel } from "@/components/SetupPanel";
 import { Sidebar } from "@/components/Sidebar";
 import { ThemeToggle } from "@/components/ThemeToggle";
@@ -30,9 +31,7 @@ export default function Chat() {
       interests={shush.interests}
       selected={shush.selected}
       setSelected={shush.setSelected}
-      myInterests={shush.myInterests}
-      onAddMyInterest={shush.addMyInterest}
-      onRemoveMyInterest={shush.removeMyInterest}
+      onAddInterest={shush.addInterest}
       patience={shush.patience}
       setPatience={shush.setPatience}
       findStatus={shush.findStatus}
@@ -93,19 +92,14 @@ export default function Chat() {
 
         <span className="flex-1" />
 
-        {shush.nodeId && (
-          /* Diagnostic, and worth surfacing: it makes "any node serves any user" visible. */
-          <span
-            id="nodeId"
-            className="rounded-full border px-3 py-1.5 text-xs whitespace-nowrap"
-            style={{
-              borderColor: "var(--color-line)",
-              backgroundColor: "var(--color-surface-2)",
-              color: "var(--color-muted)",
+        {shush.session && (
+          <RequestsMenu
+            requests={shush.requests}
+            onRefresh={async () => {
+              await shush.reloadRequests();
+              await shush.refreshLists();
             }}
-          >
-            served by {shush.nodeId}
-          </span>
+          />
         )}
         <ThemeToggle />
       </header>
@@ -118,17 +112,12 @@ export default function Chat() {
           <Sidebar
             session={shush.session}
             friends={shush.friends}
-            requests={shush.requests}
             conversations={shush.conversations}
             openConversationId={shush.conversationId}
             chatOnScreen={shush.view === "chat"}
             onOpenFriend={shush.openFriend}
             onOpenConversation={shush.openConversationFromHistory}
             onFindSomeone={shush.goHome}
-            onRefresh={async () => {
-              await shush.reloadRequests();
-              await shush.refreshLists();
-            }}
           />
         )}
 
