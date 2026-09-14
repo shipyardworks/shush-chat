@@ -7,7 +7,7 @@ import java.util.UUID;
 /**
  * Someone in the wait pool.
  *
- * @param patienceSeconds 5, 10, or 0 for "wait as long as it takes". The dial is honest about
+ * @param patienceSeconds 5, 10, 30, or 0 for "wait as long as it takes". The dial is honest about
  *                        the trade: when Shush is quiet the 5-second option usually hands you a
  *                        random person, which is the point of it (pre-plan.md 3, step 4).
  */

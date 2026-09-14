@@ -586,11 +586,15 @@ into it while the other had already gone.
 been unpleasant under the old one, which is the wrong thing to make easy on a service built on
 anonymity. A name is given once, at the door.
 
-**Interests of your own stay in this browser.** The matcher works on a controlled vocabulary —
-both sides picking from the same fixed list is what makes "you both like Music" a fact rather
-than a guess — so a tag only one person has cannot pair them with anybody. They are there to
-say what you are into when the list has not got it, they live in `localStorage`, and nothing
-sends them anywhere.
+**Interests of your own are shared, not local — this reverses an earlier choice.** They used to
+live only in `localStorage`, on the reasoning that the matcher needs a shared vocabulary and a
+tag only one person has cannot pair anyone by construction. That reasoning was sound and the
+conclusion was wrong: the fix for a private tag not being shared is to share it, not to keep it
+private. A typed tag is now a real row in `interests`, deduped by a slugified key so "Xabc",
+"xabc" and "  xabc  " all resolve to the same one — which is what lets two strangers who each
+typed it be told "you both like xabc" and actually mean it. `id` moved from a hand-seeded
+`smallint` to an identity column for this; nothing else about the matching pipeline changed,
+because a tag someone typed an hour ago and one seeded on day one are the same kind of row.
 
 **History of everything, strangers included.** `pre-plan.md` says a stranger conversation
 nobody asked to keep does not survive its ending, and the retention job deleted it an hour

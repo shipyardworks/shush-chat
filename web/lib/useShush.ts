@@ -18,32 +18,6 @@ import type {
 } from "./types";
 
 const DEVICE_TOKEN = "shush.deviceToken";
-const MY_INTERESTS = "shush.myInterests";
-
-/**
- * Interests of your own, kept in this browser and nowhere else.
- *
- * <p>Deliberately not sent anywhere. The matcher works on a controlled vocabulary -- both sides
- * draw from the same fixed list, which is what makes "you both like Music" a fact rather than a
- * guess -- and a tag only one person has cannot match anyone by construction. So these are for
- * saying what you are into when the list does not have it, and they stay on this machine.
- */
-const readMyInterests = (): string[] => {
-  try {
-    const stored = JSON.parse(localStorage.getItem(MY_INTERESTS) ?? "[]");
-    return Array.isArray(stored) ? stored.filter((one) => typeof one === "string") : [];
-  } catch {
-    return [];
-  }
-};
-
-const writeMyInterests = (values: string[]) => {
-  try {
-    localStorage.setItem(MY_INTERESTS, JSON.stringify(values));
-  } catch {
-    // Private browsing. They simply will not be remembered, which is not worth failing over.
-  }
-};
 
 const remember = (token: string) => {
   try {
@@ -80,9 +54,7 @@ export const useShush = () => {
     all: [],
   });
   const [selected, setSelected] = useState<number[]>([]);
-  const [myInterests, setMyInterests] = useState<string[]>([]);
   const [patience, setPatience] = useState(5);
-  const [nodeId, setNodeId] = useState<string | null>(null);
   const [findStatus, setFindStatus] = useState("");
   const [typing, setTyping] = useState(false);
   const [items, setItems] = useState<ChatItem[]>([]);
@@ -239,7 +211,8 @@ export const useShush = () => {
       const type = String(frame.type);
 
       if (type === "hello") {
-        setNodeId(String(frame.nodeId));
+        // Which node picked up the socket. Not shown to anyone -- it was a debugging aid, not
+        // something a person using the product has a reason to see.
         return;
       }
 
@@ -463,8 +436,6 @@ export const useShush = () => {
     if (next.token) remember(next.token);
     setSession(next);
     meRef.current = next.user.id;
-
-    setMyInterests(readMyInterests());
 
     const catalogue = await api.interests();
     setInterests({ suggested: catalogue.suggested, all: catalogue.all });
@@ -774,23 +745,25 @@ export const useShush = () => {
     [peer.userId, refreshLists],
   );
 
-  const addMyInterest = useCallback((label: string) => {
-    const trimmed = label.trim().slice(0, 40);
+  /**
+   * Adds a tag to the shared list and selects it. It is a real interest the moment it exists --
+   * the server hands back the same row for the same tag no matter who asks, which is what lets
+   * two people who typed it separately be matched on it later.
+   */
+  const addInterest = useCallback(async (label: string) => {
+    const trimmed = label.trim();
     if (!trimmed) return;
-    setMyInterests((current) => {
-      if (current.some((one) => one.toLowerCase() === trimmed.toLowerCase())) return current;
-      const next = [...current, trimmed];
-      writeMyInterests(next);
-      return next;
-    });
-  }, []);
-
-  const removeMyInterest = useCallback((label: string) => {
-    setMyInterests((current) => {
-      const next = current.filter((one) => one !== label);
-      writeMyInterests(next);
-      return next;
-    });
+    try {
+      const interest = await api.createInterest(trimmed);
+      setInterests((current) =>
+        current.all.some((one) => one.id === interest.id)
+          ? current
+          : { ...current, all: [...current.all, interest] },
+      );
+      setSelected((current) => (current.includes(interest.id) ? current : [...current, interest.id]));
+    } catch {
+      // Not worth a modal over. The tile simply does not appear, and typing it again retries.
+    }
   }, []);
 
   const goHome = useCallback(() => {
@@ -835,12 +808,9 @@ export const useShush = () => {
     interests,
     selected,
     setSelected,
-    myInterests,
-    addMyInterest,
-    removeMyInterest,
+    addInterest,
     patience,
     setPatience,
-    nodeId,
     findStatus,
     typing,
     items,

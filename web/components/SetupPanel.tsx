@@ -3,26 +3,18 @@
 import { useState } from "react";
 import type { Interest } from "@/lib/types";
 
-/**
- * Five is enough to choose from without turning the first screen into a wall of tags, and
- * anything already selected stays visible however the list is trimmed -- a hidden selection is
- * worse than a long list.
- */
-const SHOWN = 5;
-
 const PATIENCE = [
-  { seconds: 5, label: "5 seconds" },
-  { seconds: 10, label: "10 seconds" },
-  { seconds: 0, label: "As long as it takes" },
+  { seconds: 5, label: "5s" },
+  { seconds: 10, label: "10s" },
+  { seconds: 30, label: "30s" },
+  { seconds: 0, label: "Forever" },
 ];
 
 export const SetupPanel = ({
   interests,
   selected,
   setSelected,
-  myInterests,
-  onAddMyInterest,
-  onRemoveMyInterest,
+  onAddInterest,
   patience,
   setPatience,
   findStatus,
@@ -32,9 +24,7 @@ export const SetupPanel = ({
   interests: { suggested: Interest[]; all: Interest[] };
   selected: number[];
   setSelected: (next: number[]) => void;
-  myInterests: string[];
-  onAddMyInterest: (label: string) => void;
-  onRemoveMyInterest: (label: string) => void;
+  onAddInterest: (label: string) => void;
   patience: number;
   setPatience: (next: number) => void;
   findStatus: string;
@@ -42,154 +32,106 @@ export const SetupPanel = ({
   /** Dropped into an existing surface rather than centred on its own screen. */
   bare?: boolean;
 }) => {
-  const [showAll, setShowAll] = useState(false);
   const [draft, setDraft] = useState("");
 
-  // Suggestions first, then everything else, so the useful ones survive the trim.
+  // Suggestions first, then everything else -- the useful ones are what a returning visitor
+  // sees without scrolling.
   const ordered = [
     ...interests.suggested,
     ...interests.all.filter((one) => !interests.suggested.some((s) => s.id === one.id)),
   ];
-  const head = ordered.slice(0, SHOWN);
-  const visible = showAll
-    ? ordered
-    : [...head, ...ordered.filter((one) => selected.includes(one.id) && !head.includes(one))];
 
   const toggle = (id: number) =>
     setSelected(selected.includes(id) ? selected.filter((one) => one !== id) : [...selected, id]);
 
-  const addMine = () => {
-    onAddMyInterest(draft);
+  const submitDraft = () => {
+    if (!draft.trim()) return;
+    onAddInterest(draft);
     setDraft("");
   };
 
   const body = (
     <>
-        <div>
-          <h2 className="section-label">What are you into?</h2>
-          <div id="interestTiles" className="flex flex-wrap gap-2">
-            {visible.map((interest) => {
-              const on = selected.includes(interest.id);
-              return (
-                <button
-                  key={interest.id}
-                  type="button"
-                  data-interest-id={interest.id}
-                  data-testid="interest"
-                  aria-pressed={on}
-                  onClick={() => toggle(interest.id)}
-                  className={on ? "btn-primary" : "btn"}
-                >
-                  {interest.label}
-                </button>
-              );
-            })}
-          </div>
-          {ordered.length > SHOWN && (
-            <div className="mt-2.5">
+      <div>
+        <h2 className="section-label">What are you into?</h2>
+        {/*
+          One list, one look, one way to make a tile: a typed tag becomes a real interest the
+          moment it is created, so there is nothing left to style differently. Everything that
+          does not fit scrolls rather than folding behind a Show more -- picking is the part of
+          this screen that matters, and a fixed-height scroller keeps the rest of the page still
+          while that happens.
+        */}
+        <div
+          id="interestTiles"
+          className="scroll-elegant flex max-h-[220px] flex-wrap content-start gap-2 overflow-y-auto pr-1"
+        >
+          {ordered.map((interest) => {
+            const on = selected.includes(interest.id);
+            return (
               <button
-                id="showOthers"
+                key={interest.id}
                 type="button"
-                className="btn-ghost"
-                onClick={() => setShowAll(!showAll)}
+                data-interest-id={interest.id}
+                data-testid="interest"
+                aria-pressed={on}
+                onClick={() => toggle(interest.id)}
+                className={on ? "btn-primary" : "btn"}
               >
-                {showAll ? "Show less" : "Show more"}
+                {interest.label}
               </button>
-            </div>
-          )}
+            );
+          })}
 
-          {/* Yours, kept in this browser and sent nowhere. Matching works on a shared
-              vocabulary -- both sides picking from the same list is what makes "you both like
-              Music" true -- so a tag only you have cannot pair you with anybody. It is here to
-              say what you are into when the list has not got it. */}
-          <div className="mt-4">
-            <div className="mb-2 flex flex-wrap gap-2">
-              {myInterests.map((label) => (
-                <span
-                  key={label}
-                  data-testid="myInterest"
-                  className="flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm"
-                  style={{
-                    borderColor: "var(--color-line)",
-                    backgroundColor: "var(--color-surface-2)",
-                    color: "var(--color-muted)",
-                  }}
-                >
-                  {label}
-                  <button
-                    type="button"
-                    aria-label={`Remove ${label}`}
-                    onClick={() => onRemoveMyInterest(label)}
-                    className="cursor-pointer opacity-60 hover:opacity-100"
-                  >
-                    ✕
-                  </button>
-                </span>
-              ))}
-            </div>
-            <div className="flex items-center gap-2">
-              <input
-                id="myInterestInput"
-                type="text"
-                className="field max-w-[240px] py-1.5 text-sm"
-                placeholder="Something else you are into"
-                value={draft}
-                onChange={(event) => setDraft(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter") addMine();
-                }}
-              />
-              <button
-                id="addMyInterest"
-                type="button"
-                className="btn-ghost py-1.5 text-sm"
-                onClick={addMine}
-              >
-                Add
-              </button>
-            </div>
-            <p className="mt-1.5 text-[12px]" style={{ color: "var(--color-faint)" }}>
-              Only you see these. They stay in this browser and are not used for matching.
-            </p>
-          </div>
+          {/* The same shape as a tile, so adding one does not read as a different feature --
+              just an empty slot waiting for a word. Enter creates and selects it in one step. */}
+          <input
+            id="addInterestInput"
+            type="text"
+            placeholder="+ Something else"
+            maxLength={40}
+            value={draft}
+            onChange={(event) => setDraft(event.target.value)}
+            onKeyDown={(event) => {
+              // Enter only, as asked -- clicking away with a half-typed tag in the box must
+              // not silently create it.
+              if (event.key === "Enter") submitDraft();
+            }}
+            className="field w-[168px] px-4 py-2"
+          />
         </div>
+      </div>
 
-        <div className="mt-6">
-          <h2 className="section-label">How long will you wait?</h2>
-          <div className="flex flex-wrap gap-2">
-            {PATIENCE.map((option) => (
-              <button
-                key={option.seconds}
-                type="button"
-                aria-pressed={patience === option.seconds}
-                onClick={() => setPatience(option.seconds)}
-                className={patience === option.seconds ? "btn-primary" : "btn"}
-              >
-                {option.label}
-              </button>
-            ))}
-          </div>
-          <p className="mt-2.5 text-[13px]" style={{ color: "var(--color-muted)" }}>
-            {patience === 0
-              ? "We will only match you with somebody who actually shares an interest, however long that takes."
-              : `If nobody who shares your interests turns up in ${patience} seconds, we will just find you anyone.`}
-          </p>
+      <div className="mt-6">
+        <h2 className="section-label">How long?</h2>
+        <div className="flex flex-wrap gap-2">
+          {PATIENCE.map((option) => (
+            <button
+              key={option.seconds}
+              type="button"
+              aria-pressed={patience === option.seconds}
+              onClick={() => setPatience(option.seconds)}
+              className={patience === option.seconds ? "btn-primary" : "btn"}
+            >
+              {option.label}
+            </button>
+          ))}
         </div>
+      </div>
 
-        <div className="mt-6 flex flex-wrap items-center gap-3">
-          <button
-            id="findSomeone"
-            type="button"
-            className="btn-primary"
-            disabled={selected.length === 0}
-            onClick={onFind}
-          >
-            Find someone
-          </button>
-          <span id="findStatus" className="text-[13px]" style={{ color: "var(--color-muted)" }}>
-            {findStatus}
-          </span>
-        </div>
+      <div className="mt-6 flex flex-wrap items-center gap-3">
+        <button
+          id="findSomeone"
+          type="button"
+          className="btn-primary"
+          disabled={selected.length === 0}
+          onClick={onFind}
+        >
+          Find someone
+        </button>
+        <span id="findStatus" className="text-[13px]" style={{ color: "var(--color-muted)" }}>
+          {findStatus}
+        </span>
+      </div>
     </>
   );
 

@@ -64,6 +64,37 @@ class MatchingIT extends AbstractIT {
     }
 
     /**
+     * The point of the whole feature: two strangers who each typed a tag nobody curated still
+     * end up on the same shared row, and matching cannot tell that apart from a tag that shipped
+     * on day one. If this test needs anything special to pass, the design is wrong.
+     */
+    @Test
+    void twoStrangersWithTheSameCustomTagAreMatchedOnIt() throws Exception {
+        TestUsers.Session alice = testUsers.newAnonymous();
+        TestUsers.Session bob = testUsers.newAnonymous();
+
+        short tagId = (short) rest.exchange("/api/interests", org.springframework.http.HttpMethod.POST,
+                        new org.springframework.http.HttpEntity<>(
+                                java.util.Map.of("label", "Competitive Origami"),
+                                testUsers.authorised(alice)),
+                        JsonNode.class)
+                .getBody().path("id").asInt();
+
+        try (WsClient aliceWs = WsClient.connect(port, alice.jwt());
+             WsClient bobWs = WsClient.connect(port, bob.jwt())) {
+            aliceWs.await("hello");
+            bobWs.await("hello");
+
+            find(aliceWs, List.of(tagId), 0);
+            find(bobWs, List.of(tagId), 0);
+
+            JsonNode asAlice = aliceWs.await("matched");
+            assertThat(asAlice.path("randomMatch").asBoolean()).isFalse();
+            assertThat(asAlice.path("sharedInterestIds").get(0).asInt()).isEqualTo(tagId);
+        }
+    }
+
+    /**
      * The five-second option is honest about what it is: try for a shared interest, then give
      * me anyone. When Shush is quiet that means a random person, and the conversation says so.
      */

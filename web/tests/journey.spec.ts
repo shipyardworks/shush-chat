@@ -15,6 +15,15 @@ const arrive = async (browser: Browser): Promise<Page> => {
   return page;
 };
 
+/** Requests live behind an icon in the header now, not a permanent section of the sidebar. */
+const openRequests = async (page: Page) => {
+  await page.locator("#requestsButton").click();
+};
+
+const openTab = async (page: Page, tab: "chats" | "friends") => {
+  await page.locator(tab === "chats" ? "#tabChats" : "#tabFriends").click();
+};
+
 const matchThem = async (a: Page, b: Page) => {
   for (const page of [a, b]) {
     await expect(page.locator("[data-testid=interest]").first()).toBeVisible();
@@ -70,18 +79,24 @@ test("two strangers match on a shared interest, talk, and keep each other", asyn
     alice.locator("[data-testid=message][data-mine=true]").first().locator("[data-testid=ticks]"),
   ).toHaveAttribute("data-state", "read");
 
-  // Asking to keep somebody has to be VISIBLE to them, not merely present in the DOM.
+  // Asking to keep somebody has to be VISIBLE to them, not merely present in the DOM. The
+  // badge on the header icon is what says something is waiting before it is even opened.
   await alice.locator("#addFriend").click();
-  await expect(bob.locator("[data-testid=request]")).toBeVisible();
   await expect(bob.locator("[data-testid=requestCount]")).toBeVisible();
+  await openRequests(bob);
+  await expect(bob.locator("[data-testid=request]")).toBeVisible();
 
   await bob.getByRole("button", { name: "Accept" }).click();
+  await bob.keyboard.press("Escape");
+  await openTab(bob, "friends");
+  await openTab(alice, "friends");
   await expect(bob.locator("[data-testid=friend]")).toBeVisible();
   await expect(alice.locator("[data-testid=friend]")).toBeVisible();
 
   // The friends list is the only route back: matching refuses to pair existing friends.
   await bob.locator("#home").click();
   await expect(bob.locator("#findSomeone")).toBeVisible();
+  await openTab(bob, "friends");
   await bob.locator("[data-testid=friend]").first().click();
   await expect(bob.locator("#messages")).toContainText("hello from alice");
 
@@ -119,7 +134,10 @@ test("unread counts, and removing a friend makes them matchable again", async ({
   await matchThem(alice, bob);
 
   await alice.locator("#addFriend").click();
+  await openRequests(bob);
   await bob.getByRole("button", { name: "Accept" }).click();
+  await bob.keyboard.press("Escape");
+  await openTab(bob, "friends");
   await expect(bob.locator("[data-testid=friend]")).toBeVisible();
 
   // Bob looks away, so what arrives is waiting for him rather than read.
@@ -140,16 +158,46 @@ test("unread counts, and removing a friend makes them matchable again", async ({
   await matchThem(alice, bob);
 });
 
-test("five interests, then all of them, then five again", async ({ browser }) => {
+test("every interest is in one scrollable list, not five behind a toggle", async ({ browser }) => {
   const page = await arrive(browser);
   const tiles = page.locator("[data-testid=interest]");
-  await expect(tiles).toHaveCount(5);
+  await expect(tiles.first()).toBeVisible();
+  const count = await tiles.count();
+  expect(count).toBeGreaterThan(5);
 
-  await page.locator("#showOthers").click();
-  const all = await tiles.count();
-  expect(all).toBeGreaterThan(5);
-  await expect(page.locator("#showOthers")).toHaveText("Show less");
+  // The list fits in a fixed-height box and scrolls rather than expanding the page --
+  // "Show more" is gone, and there is nothing to click to reveal the rest.
+  const overflows = await page
+    .locator("#interestTiles")
+    .evaluate((node) => node.scrollHeight > node.clientHeight);
+  expect(overflows).toBe(true);
+  await expect(page.locator("#showOthers")).toHaveCount(0);
+});
 
-  await page.locator("#showOthers").click();
-  expect(await tiles.count()).toBeLessThan(all);
+test("typing a tag and pressing Enter adds it as an ordinary interest", async ({ browser }) => {
+  const page = await arrive(browser);
+  // #displayName is visible as soon as the session exists, which is before the interest
+  // catalogue has finished loading -- counting tiles here without waiting for the first one
+  // races that load and can capture zero.
+  await expect(page.locator("[data-testid=interest]").first()).toBeVisible();
+  const before = await page.locator("[data-testid=interest]").count();
+
+  // A tag nobody has typed before, in this process or an earlier run of this test: the
+  // interests table is real, shared, and permanent, so "Competitive Origami" from the last
+  // time this suite ran is still sitting in it -- creating it again is a no-op by design (the
+  // dedupe test above already proves that) and would leave this count unchanged rather than +1.
+  const label = `Competitive Origami ${Date.now()}`;
+  await page.locator("#addInterestInput").fill(label);
+  await page.locator("#addInterestInput").press("Enter");
+
+  const created = page.locator("[data-interest-id]", { hasText: label });
+  await expect(created).toBeVisible();
+  // The same element, the same class, the same everything a curated tile gets -- there is no
+  // second kind of tile to look different or carry an "x" of its own.
+  await expect(created).toHaveAttribute("data-testid", "interest");
+  await expect(created).toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator("[data-testid=interest]")).toHaveCount(before + 1);
+
+  // The box is empty again and ready for the next one -- no separate "Add" button was clicked.
+  await expect(page.locator("#addInterestInput")).toHaveValue("");
 });

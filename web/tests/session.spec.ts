@@ -34,6 +34,15 @@ const say = async (page: Page, text: string) => {
   await page.locator("#send").click();
 };
 
+/** Requests live behind an icon in the header, not a permanent section of the sidebar. */
+const openRequests = async (page: Page) => {
+  await page.locator("#requestsButton").click();
+};
+
+const openTab = async (page: Page, tab: "chats" | "friends") => {
+  await page.locator(tab === "chats" ? "#tabChats" : "#tabFriends").click();
+};
+
 test("leaving reaches both people and closes the conversation", async ({ browser }) => {
   const alice = await arrive(browser);
   const bob = await arrive(browser);
@@ -89,6 +98,8 @@ test("a friend request says who it is from", async ({ browser }) => {
   await matchThem(alice, bob);
 
   await alice.locator("#addFriend").click();
+  await expect(bob.locator("[data-testid=requestCount]")).toBeVisible();
+  await openRequests(bob);
   await expect(bob.locator("[data-testid=request]")).toContainText(aliceName);
   await expect(bob.locator("[data-testid=request]")).not.toContainText("Someone would like");
 });
@@ -100,10 +111,14 @@ test("an accepted friend is listed once, under Friends", async ({ browser }) => 
   await say(alice, "keeping you");
 
   await alice.locator("#addFriend").click();
+  await openRequests(bob);
   await bob.getByRole("button", { name: "Accept" }).click();
+  await bob.keyboard.press("Escape");
+  await openTab(bob, "friends");
   await expect(bob.locator("[data-testid=friend]")).toHaveCount(1);
 
   // Under Friends, and no longer duplicated under Chats.
+  await openTab(bob, "chats");
   await expect(bob.locator("[data-testid=chat]")).toHaveCount(0);
 });
 
@@ -124,20 +139,39 @@ test("a photo opens full size", async ({ browser }) => {
   await expect(bob.locator("#imageViewer")).toHaveCount(0);
 });
 
-test("interests of your own live in this browser only", async ({ browser }) => {
-  const page = await arrive(browser);
+test("a custom tag is shared, not local, and two people typing it are matched on it", async ({
+  browser,
+}) => {
+  const alice = await arrive(browser);
+  const bob = await arrive(browser);
 
-  await page.locator("#myInterestInput").fill("Competitive origami");
-  await page.locator("#addMyInterest").click();
-  await expect(page.locator("[data-testid=myInterest]")).toContainText("Competitive origami");
+  // Nothing on this screen claims otherwise any more -- a tag typed here is exactly as shared
+  // as a curated one, so there is nothing here to say it is not.
+  await expect(alice.locator("text=Only you see these")).toHaveCount(0);
+  await expect(alice.locator("text=not used for matching")).toHaveCount(0);
 
-  // Remembered here...
-  await page.reload();
-  await expect(page.locator("[data-testid=myInterest]")).toContainText("Competitive origami");
+  // A different spelling of the same tag, from someone who has never seen alice's tile.
+  await alice.locator("#addInterestInput").fill("Xylophone Repair");
+  await alice.locator("#addInterestInput").press("Enter");
+  await bob.locator("#addInterestInput").fill("  xylophone repair  ");
+  await bob.locator("#addInterestInput").press("Enter");
 
-  // ...and nowhere else. A second person never sees it.
-  const other = await arrive(browser);
-  await expect(other.locator("[data-testid=myInterest]")).toHaveCount(0);
+  const aliceTile = alice.locator("[data-interest-id]", { hasText: "Xylophone Repair" });
+  const bobTile = bob.locator("[data-interest-id]", { hasText: "Xylophone Repair" });
+  await expect(aliceTile).toBeVisible();
+  await expect(bobTile).toBeVisible();
+  expect(await aliceTile.getAttribute("data-interest-id")).toBe(
+    await bobTile.getAttribute("data-interest-id"),
+  );
+
+  // Selected the moment it is created, on both sides, and that shared id is exactly what
+  // matching needs -- so the two of them find each other on the strength of it alone.
+  await alice.waitForTimeout(400);
+  await alice.locator("#findSomeone").click();
+  await bob.locator("#findSomeone").click();
+  await expect(alice.locator("#chat")).toBeVisible();
+  await expect(bob.locator("#chat")).toBeVisible();
+  await expect(alice.locator("#chatSub")).toContainText(/you both like/i);
 });
 
 test("there is no way to shuffle a name", async ({ browser }) => {

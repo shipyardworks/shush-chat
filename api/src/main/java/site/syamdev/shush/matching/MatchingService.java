@@ -78,8 +78,8 @@ public class MatchingService {
         if (interestIds == null || interestIds.isEmpty()) {
             throw ApiException.badRequest("no_interests", "pick at least one interest first");
         }
-        if (patienceSeconds != 0 && patienceSeconds != 5 && patienceSeconds != 10) {
-            throw ApiException.badRequest("invalid_patience", "patience is 5, 10, or 0 for no limit");
+        if (patienceSeconds != 0 && patienceSeconds != 5 && patienceSeconds != 10 && patienceSeconds != 30) {
+            throw ApiException.badRequest("invalid_patience", "patience is 5, 10, 30, or 0 for no limit");
         }
 
         interests.recordSelection(userId, interestIds);

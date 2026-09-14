@@ -13,7 +13,7 @@
 > **Generated — do not edit.** Change the schema by adding a migration under
 > `api/src/main/resources/db/migration/`, then run `cd api && ./mvnw verify`.
 
-Generated 2026-09-10 from 16 tables.
+Generated 2026-09-14 from 16 tables.
 
 ## Migrations applied
 
@@ -26,6 +26,7 @@ Generated 2026-09-10 from 16 tables.
 | `V5` | friend request declined | yes |
 | `V6` | cors origins | yes |
 | `V7` | message interactions | yes |
+| `V8` | custom interests | yes |
 
 ---
 
