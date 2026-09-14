@@ -5,9 +5,11 @@
 >
 > Every claim here is backed by a command in `README.md` §8 that passes.
 
-**Status: all eight phases complete**, plus a platform split that came after the plan was
-written. Outstanding: the benchmark on dedicated hardware and the recorded demo (`deploy.md` §3
-and §4), both of which need a machine that is not this laptop.
+**Status: all eight phases complete**, plus three rounds of work that came after the plan was
+written: a platform split, a client rewrite, and feature work beyond the original phase 8 scope
+(message interactions, per-friend unread counts, unfriending, shared custom interests, and closing
+a real gap in how a conversation ends). Outstanding: the benchmark on dedicated hardware and the
+recorded demo (`deploy.md` §3 and §4), both of which need a machine that is not this laptop.
 
 ---
 
@@ -34,10 +36,14 @@ presenting laptop figures as a headline number.
 
 | Suite | Count | Notes |
 | ----- | ----- | ----- |
-| Integration (`api`) | 170 | Real Postgres, Redis, Redpanda, Elasticsearch, MinIO and Chrome via Testcontainers. Nothing mocked |
-| Unit (`api`) | 11 | Pure logic only |
+| Integration (`api`) | 186 | Real Postgres, Redis, Redpanda, Elasticsearch, MinIO via Testcontainers. Nothing mocked |
+| Unit (`api`) | 9 | Pure logic only |
+| Browser (`web`, Playwright) | 33 | Journey, session, layout and interactions specs, against a stack that is already running |
 | Harness self-tests (`bench`) | 17 | Each invariant fed a violating stream, asserted to report it |
 | Isolation (`platform`) | 5 checks | Cross-tenant access attempted with real credentials |
+
+`./mvnw clean verify` no longer drives a browser — that moved to `web`'s Playwright suite when the
+client left `api/` (see below). The two counts do not overlap.
 
 ---
 
@@ -52,11 +58,49 @@ Everything below is a deliberate departure, with the reason.
 [`platform`](https://github.com/shipyardworks/platform) and
 [`observability`](https://github.com/shipyardworks/observability), because
 this stopped being the only app that will run on the box. This repo keeps
-`compose.platform.yaml`: three stateless replicas and nothing else.
+`compose.platform.yaml`: three stateless replicas, the frontend container, and nothing else.
 
 **This knowingly gives up R7** (`aim.md` §2): a reviewer can no longer clone this repo alone and
 run it with one command. That was the owner's call, taken explicitly. The replacement is three
 repos and a documented order in the platform README.
+
+### The client became a Next.js app, not the single file `aim.md` called correct
+
+`aim.md` §1.3 names "a deliberately plain single-page test client" as the correct trade for this
+project's aim, and `plan.md` §5 (Phase 7) specced `web/index.html`: one file, no build step, no
+framework. That client did its job through phase 7 and became the ceiling on how the product could look.
+The owner reversed the call explicitly: `web/` is now a Next.js app in its own container,
+proxied by the shared nginx at `/` with `/api` and `/ws` underneath it, so the browser sees one
+origin and pays no CORS cost in the normal path.
+
+**This gives up something concrete, on purpose.** `TestClientJourneyIT` and the Selenium
+container went with the file they drove — `./mvnw clean verify` no longer exercises a real
+browser. `cd web && npm test` (Playwright) covers the same ground — matching in both directions,
+images that actually load, a request visible to its recipient, unread counts, delivery ticks, a
+removed friend becoming matchable again — but only against a stack that is already up, which the
+Java suite never needed. The landing page stays a server component (real HTML before any
+JavaScript runs); everything past it is a live websocket and a token held in `localStorage`
+rather than an `httpOnly` cookie, the honest trade for a client-rendered app.
+
+### Custom interests are shared, reversing an earlier choice
+
+A tag typed into "something else you're into" started out client-side only, in `localStorage`,
+on the reasoning that matching needs a shared vocabulary and a private tag cannot pair anyone by
+construction. That reasoning was sound and drew the wrong conclusion: the fix for "a private tag
+can't match anyone" is to stop it being private. `POST /api/interests` now finds or creates a
+shared row per tag, deduped by a slugified key so `"Xabc"`, `"xabc"` and `"  xabc  "` become one
+interest that two strangers can genuinely be told they share. `Interest.id` moved from a
+hand-seeded `smallint` to an identity column for the same reason — a tag typed at 3am has no
+number to bring with it.
+
+### Reactions and deletes bypass Redpanda by design
+
+`plan.md` does not cover message interactions; they were added afterward, and deliberately do
+not go through the log. The write-ahead log exists for things that need a position in the
+conversation, a sequence number, and exactly one writer. A reaction has no position, and a
+deletion edits a row that already has one — routing either through a topic partitioned by
+`conversationId` would buy nothing. `seq` stays dense: deleting a message clears its body rather
+than the row, because the ordering harness reads a gap in `seq` as a lost message.
 
 ### Names are tenant-prefixed on the platform
 
@@ -131,13 +175,20 @@ Each was invisible to code review and would have shipped.
 | 19 | The client acknowledged reads from a view that was not on screen — which lies to the sender and zeroes your own unread count | the unread badge never appearing |
 | 20 | `now - Long.MIN_VALUE` overflows, so the CORS cache looked permanently fresh and the origin set stayed empty for ever, refusing every cross-origin request with nothing logged | a preflight from an origin that was in the table |
 | 21 | nginx forwarded `$host`, which drops the port, so the app compared `localhost:8081` against `localhost`, decided its own frontend was cross-origin, and refused the websocket handshake | the Next.js client failing to connect at all |
+| 22 | Leaving a conversation told only the leaver — the other person saw nothing and could still send into a conversation that had already ended | extending the conversation-lifecycle tests |
+| 23 | Optimistic rendering had two faults: a sent image had no bubble yet to reconcile the server's echo against, so it was silently dropped for the sender though it arrived fine for the recipient; and whether a bubble already existed was read from a flag set inside a state updater on the same line that needed the answer, so every one of your own text messages rendered twice | a counted assertion, after `toContainText` passed happily against the duplicate |
+| 24 | The message menu was positioned inside its row rather than against the button that opened it, and the attachment preview sized a tall image against a grid row that had already stretched to fit it — the last message's menu opened off the bottom of the window, and a tall photo pushed through its own caption box | bounding-box assertions across a tall, a wide, a square and a tiny image |
+| 25 | `backdrop-filter` on the header made it the containing block for the requests dropdown's fixed-position backdrop, silently confining the click-outside catcher to a thin strip under the header — clicking anywhere else in the page did nothing | `elementFromPoint` at the sidebar's coordinates |
+| 26 | nginx (in `platform`) resolves a proxied hostname once at startup; rebuilding the frontend container left it pointing at a dead IP, and every request came back 502 until nginx was restarted | 502s after a routine rebuild |
 
-Two of these are worth separating out, because the tests that "covered" them passed:
+Four of these are worth separating out, because the tests that "covered" them passed:
 
 - **12 and 13 were both hidden by weak assertions.** The journey test waited for
   `presenceOfElementLocated` on the request button — presence, not visibility — so it passed
   against an element that no recipient could ever see. Nothing asserted that an image *loads*,
   only that a bubble appeared. Both assertions are now the stronger ones.
+- **23 was hidden the same way.** `toContainText` passes happily against a duplicate message; the
+  assertion is counted now.
 - **20 and 21 are the same shape as 11.** Each was a silent refusal with no log line and no
   failing test — a cache that never refreshed, and a port dropped by a proxy. Both were found by
   asking the running system a question, not by reading the code that caused them.
@@ -152,19 +203,26 @@ Two of these are worth separating out, because the tests that "covered" them pas
 ```
 api/src/main/java/site/syamdev/shush/
   auth/          anonymous identity, device tokens, signup, login, JWT
-  user/          names, interests, profile
-  conversation/  lifecycle, participants, history, resume
-  message/       producer, chat-writer consumer, sequencing, dedup
+  user/          names, interests (including custom ones, now shared), profile
+  conversation/  lifecycle, participants, history, resume, ending
+  message/       producer, chat-writer consumer, sequencing, dedup, reply/react/delete
   realtime/      WebSocket handler, session registry, Redis backplane, ordered delivery
   presence/      presence, typing
   matching/      wait pool, Elasticsearch scoring, atomic Lua claim
-  social/        friend requests, friendships, blocks, reports, invites
+  social/        friend requests, friendships (with unfriending), blocks, reports, invites
   media/         presigned upload, HEAD confirmation
   scheduler/     five retention jobs behind a Redis lock
+  cors/          allowed-origin table, re-read every 15s; decides HTTP CORS and the websocket handshake
+  common/        AfterCommit — run an action after the surrounding transaction, or now if there isn't one
   config/        security, Kafka, Redis, storage, node identity
+
+web/
+  app/           landing page (server component) and the chat page
+  components/    Sidebar, ChatPanel, MessageBubble, message actions, attachment preview,
+                 camera capture, emoji picker, requests menu, theme toggle
+  lib/           useShush — the websocket client and all client-side state
+  tests/         Playwright: journey, session, layout, interactions
 ```
 
 `bench/` is a standalone harness sharing **no code** with `api/`, so a bug in a shared helper
 cannot cancel itself out across both sides.
-
-`web/index.html` is the whole client: one file, no build step, no dependencies.
