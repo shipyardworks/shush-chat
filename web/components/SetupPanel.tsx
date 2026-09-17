@@ -159,6 +159,7 @@ export const SetupPanel = ({
   findStatus,
   onFind,
   bare = false,
+  onBack,
 }: {
   interests: { suggested: Interest[]; all: Interest[] };
   selected: number[];
@@ -173,6 +174,8 @@ export const SetupPanel = ({
   onFind: () => void;
   /** Dropped into an existing surface rather than centred on its own screen. */
   bare?: boolean;
+  /** Phone only, and only when not bare: returns to the sidebar list. */
+  onBack?: () => void;
 }) => {
   const [draft, setDraft] = useState("");
 
@@ -217,11 +220,6 @@ export const SetupPanel = ({
             {chosen.map((interest) => (
               <Tile key={interest.id} interest={interest} on onClick={() => toggle(interest.id)} />
             ))}
-            {chosen.length === 0 && (
-              <span className="text-[13px]" style={{ color: "var(--color-faint)" }}>
-                Pick a few below, or type your own —
-              </span>
-            )}
             {/* The same shape as a tile, so adding one does not read as a different feature --
                 just an empty slot waiting for a word. Enter creates and selects it in one step.
                 autoComplete is off on purpose: a bare text input with no name of its own is
@@ -283,8 +281,23 @@ export const SetupPanel = ({
   return bare ? (
     body
   ) : (
-    <div className="grid min-h-0 flex-1 place-items-center overflow-y-auto p-6">
-      <div className="panel w-full max-w-[620px] p-7">{body}</div>
+    <div className="grid min-h-0 flex-1 place-items-start overflow-y-auto p-3.5 sm:place-items-center sm:p-6">
+      <div className="panel w-full max-w-[620px] p-4 sm:p-7">
+        {onBack && (
+          <button
+            id="setupBack"
+            type="button"
+            aria-label="Back to chats"
+            onClick={onBack}
+            className="btn-ghost -ml-1.5 mb-3 grid h-9 w-9 place-items-center rounded-full p-0 sm:hidden"
+          >
+            <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M15 18l-6-6 6-6" />
+            </svg>
+          </button>
+        )}
+        {body}
+      </div>
     </div>
   );
 };
