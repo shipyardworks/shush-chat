@@ -283,21 +283,61 @@ Docker's default form binds `0.0.0.0` and **writes directly into iptables' DOCKE
 bypassing UFW**. The firewall will look correctly configured while the port is open to
 the world. An exposed Redis or Postgres is found by scanners within hours.
 
-Reach them over SSH instead — add to `~/.ssh/config`:
+Reach them over SSH instead. This table is the actual, current port list across the three
+`platform`/`streaming`/`search`/`edge` folders plus `observability` — it superseded an earlier,
+generic 4-port version of this section that predated the multi-repo split and had gone stale
+(it even listed Redis, which at the time published no host port at all to forward to):
+
+| Service | Host port (loopback) | Repo |
+| --- | --- | --- |
+| Postgres | `55432` | `platform/data` |
+| Redis (`redis-shush`) | `16379` | `platform/data` |
+| Redpanda (Kafka) | `19092` | `platform/streaming` |
+| Redpanda admin | `19644` | `platform/streaming` |
+| Elasticsearch | `9200` | `platform/search` |
+| MinIO API | `9000` | `platform/data` |
+| MinIO console | `9001` | `platform/data` |
+| Grafana | `3001` | `observability` |
+| Prometheus | `9090` | `observability` |
+
+One command, matching the local-port choices already in use for this box:
+
+```bash
+ssh -N \
+  -L 15432:127.0.0.1:55432 \
+  -L 16379:127.0.0.1:16379 \
+  -L 19092:127.0.0.1:19092 \
+  -L 19644:127.0.0.1:19644 \
+  -L 19200:127.0.0.1:9200 \
+  -L 19000:127.0.0.1:9000 \
+  -L 19001:127.0.0.1:9001 \
+  -L 13001:127.0.0.1:3001 \
+  -L 19090:127.0.0.1:9090 \
+  syam-hetzner
+```
+
+Or as an `~/.ssh/config` block for the same host, so it's just `ssh -N syam-hetzner-tunnel`:
 
 ```
-Host syamdev-tunnel
-    HostName <same as syamdev>
-    User ubuntu
-    IdentityFile <same as syamdev>
-    LocalForward 5432 127.0.0.1:5432
-    LocalForward 6379 127.0.0.1:6379
-    LocalForward 9092 127.0.0.1:9092
-    LocalForward 3000 127.0.0.1:3000
+Host syam-hetzner-tunnel
+    HostName <same as syam-hetzner>
+    User <same as syam-hetzner>
+    IdentityFile <same as syam-hetzner>
+    LocalForward 15432 127.0.0.1:55432
+    LocalForward 16379 127.0.0.1:16379
+    LocalForward 19092 127.0.0.1:19092
+    LocalForward 19644 127.0.0.1:19644
+    LocalForward 19200 127.0.0.1:9200
+    LocalForward 19000 127.0.0.1:9000
+    LocalForward 19001 127.0.0.1:9001
+    LocalForward 13001 127.0.0.1:3001
+    LocalForward 19090 127.0.0.1:9090
 ```
 
-Then `ssh -N syamdev-tunnel` and DBeaver, `redis-cli`, and Grafana all work against
-`localhost`. No database port is ever internet-facing; SSH is the authenticated tunnel.
+Then DBeaver, `redis-cli -p 16379`, and Grafana on `localhost:13001` all work locally. No
+database port is ever internet-facing; SSH is the authenticated tunnel. Redis now publishes a
+host port the same way every other datastore here already did — it never had one before, which
+is the whole reason it couldn't be tunneled.
 
 ---
 
