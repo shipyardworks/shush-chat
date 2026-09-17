@@ -8,8 +8,11 @@ import site.syamdev.shush.common.ApiException;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.Collection;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -115,10 +118,135 @@ public class ConversationService {
         }
     }
 
-    /** Every conversation this person has had, newest first. See the query for why one call. */
+    /**
+     * Every conversation this person has had, newest first. See the query for why one call.
+     *
+     * <p>Repeat matches with the same person collapse into one row once a {@code friend} row
+     * exists among them -- accepting a request only ever kept the one conversation it came from,
+     * so without this, earlier matches with the same person stayed separate forever. A peer with
+     * no {@code friend} row is left exactly as returned: never-kept strangers stay separate.
+     */
     @Transactional(readOnly = true)
     public List<ConversationParticipantRepository.ConversationSummaryRow> historyFor(UUID userId) {
-        return participants.findConversationSummaries(userId);
+        List<ConversationParticipantRepository.ConversationSummaryRow> rows =
+                participants.findConversationSummaries(userId);
+
+        Set<UUID> peersToMerge = rows.stream()
+                .collect(Collectors.groupingBy(ConversationParticipantRepository.ConversationSummaryRow::getPeerId))
+                .values().stream()
+                .filter(group -> group.size() > 1
+                        && group.stream().anyMatch(row -> "friend".equals(row.getKind())))
+                .map(group -> group.get(0).getPeerId())
+                .collect(Collectors.toSet());
+
+        if (peersToMerge.isEmpty()) {
+            return rows;
+        }
+
+        Map<UUID, List<ConversationParticipantRepository.ConversationSummaryRow>> byPeer = rows.stream()
+                .filter(row -> peersToMerge.contains(row.getPeerId()))
+                .collect(Collectors.groupingBy(ConversationParticipantRepository.ConversationSummaryRow::getPeerId));
+
+        List<ConversationParticipantRepository.ConversationSummaryRow> result = new ArrayList<>();
+        Set<UUID> alreadyMerged = new HashSet<>();
+        // Substituting only at each peer's first occurrence in the already-sorted list keeps
+        // every row's position -- the merged row lands where that peer's latest activity sorted it.
+        for (ConversationParticipantRepository.ConversationSummaryRow row : rows) {
+            if (!peersToMerge.contains(row.getPeerId())) {
+                result.add(row);
+                continue;
+            }
+            if (!alreadyMerged.add(row.getPeerId())) {
+                continue;
+            }
+            List<ConversationParticipantRepository.ConversationSummaryRow> group = byPeer.get(row.getPeerId());
+            ConversationParticipantRepository.ConversationSummaryRow canonical = group.stream()
+                    .filter(candidate -> "friend".equals(candidate.getKind()))
+                    .findFirst()
+                    .orElseThrow();
+            int unread = group.stream()
+                    .mapToInt(ConversationParticipantRepository.ConversationSummaryRow::getUnreadCount)
+                    .sum();
+            result.add(new MergedSummaryRow(canonical.getConversationId(), canonical.getKind(),
+                    canonical.getState(), unread, canonical.getPeerId(), canonical.getPeerName(),
+                    row.getLastBody(), row.getLastKind(), row.getLastSenderId(), row.getLastAt()));
+        }
+        return result;
+    }
+
+    /**
+     * The other conversation ids this person shares with {@code conversationId}'s peer -- used
+     * to pull in messages from earlier, separate matches once they are friends (see
+     * {@link #historyFor}). Empty, not an error, when there is only ever the one.
+     */
+    @Transactional(readOnly = true)
+    public List<UUID> siblingConversationIds(UUID conversationId, UUID callerId) {
+        List<ConversationParticipant> rows = participants.findByConversationId(conversationId);
+        UUID peerId = rows.stream()
+                .map(ConversationParticipant::getUserId)
+                .filter(userId -> !userId.equals(callerId))
+                .findFirst()
+                .orElse(null);
+        if (peerId == null) {
+            return List.of();
+        }
+        return participants.findConversationIdsBetween(callerId, peerId);
+    }
+
+    private record MergedSummaryRow(UUID conversationId, String kind, String state, int unreadCount,
+                                    UUID peerId, String peerName, String lastBody, String lastKind,
+                                    UUID lastSenderId, Instant lastAt)
+            implements ConversationParticipantRepository.ConversationSummaryRow {
+
+        @Override
+        public UUID getConversationId() {
+            return conversationId;
+        }
+
+        @Override
+        public String getKind() {
+            return kind;
+        }
+
+        @Override
+        public String getState() {
+            return state;
+        }
+
+        @Override
+        public int getUnreadCount() {
+            return unreadCount;
+        }
+
+        @Override
+        public UUID getPeerId() {
+            return peerId;
+        }
+
+        @Override
+        public String getPeerName() {
+            return peerName;
+        }
+
+        @Override
+        public String getLastBody() {
+            return lastBody;
+        }
+
+        @Override
+        public String getLastKind() {
+            return lastKind;
+        }
+
+        @Override
+        public UUID getLastSenderId() {
+            return lastSenderId;
+        }
+
+        @Override
+        public Instant getLastAt() {
+            return lastAt;
+        }
     }
 
     /**

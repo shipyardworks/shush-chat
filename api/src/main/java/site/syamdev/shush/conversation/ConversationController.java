@@ -90,7 +90,8 @@ class ConversationController {
                             @RequestParam(required = false) Long before,
                             @RequestParam(required = false) Long after,
                             @RequestParam(defaultValue = "50") int limit) {
-        conversations.requireParticipant(conversationId, currentUser.requireId());
+        UUID callerId = currentUser.requireId();
+        conversations.requireParticipant(conversationId, callerId);
 
         if (before != null && after != null) {
             throw ApiException.badRequest("conflicting_cursors",
@@ -98,12 +99,21 @@ class ConversationController {
         }
 
         // `after` is the resume path -- a client that reconnects asks for what it missed, in
-        // order. `before` is scrollback. They walk the same index in opposite directions.
-        MessageService.Page page = after != null
-                ? messages.since(conversationId, after, limit)
-                : messages.history(conversationId, before, limit);
+        // order. `before` is scrollback. They walk the same index in opposite directions. A
+        // fresh open (neither cursor set) of a friend's thread additionally folds in any earlier,
+        // separate conversations with the same person -- see ConversationService#historyFor.
+        MessageService.Page page;
+        if (after != null) {
+            page = messages.since(conversationId, after, limit);
+        } else if (before == null && conversations.require(conversationId).getKind() == Conversation.Kind.FRIEND) {
+            List<UUID> siblingIds = conversations.siblingConversationIds(conversationId, callerId);
+            page = siblingIds.size() > 1
+                    ? messages.historyAcross(siblingIds, limit)
+                    : messages.history(conversationId, null, limit);
+        } else {
+            page = messages.history(conversationId, before, limit);
+        }
 
-        UUID callerId = currentUser.requireId();
         List<UUID> ids = page.messages().stream().map(Message::getId).toList();
         // Two extra queries for the whole page rather than two per message.
         Set<UUID> hidden = interactions.hiddenFrom(callerId, ids);

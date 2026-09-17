@@ -83,6 +83,28 @@ public class MessageService {
     }
 
     /**
+     * The most recent {@code limit} messages across several conversations with the same person,
+     * merged into one timeline for a friendship that folds together repeat matches (see
+     * ConversationService#historyFor). Each conversation's own {@code seq} and ordering guarantee
+     * are untouched; this only interleaves already-ordered per-conversation pages by wall-clock
+     * time for display.
+     *
+     * <p>No {@code before}/{@code after} paging across the set: nothing today scrolls back past
+     * the first page of a freshly-opened thread, so a composite cross-conversation cursor isn't
+     * worth inventing yet. Deeper scrollback still works, scoped to the single open conversation.
+     */
+    @Transactional(readOnly = true)
+    public Page historyAcross(List<UUID> conversationIds, int limit) {
+        int size = Math.clamp(limit, 1, MAX_PAGE_SIZE);
+        List<Message> merged = conversationIds.stream()
+                .flatMap(id -> history(id, null, size).messages().stream())
+                .sorted(Comparator.comparing(Message::getCreatedAt))
+                .toList();
+        int from = Math.max(0, merged.size() - size);
+        return new Page(merged.subList(from, merged.size()), null);
+    }
+
+    /**
      * Everything after {@code afterSeq}, oldest first -- what a client asks for when it
      * reconnects and needs the messages that arrived while it was gone (pre-plan.md 3: anything
      * sent while someone is away reaches them when they return, in the right order).

@@ -115,6 +115,18 @@ public interface ConversationParticipantRepository
             """, nativeQuery = true)
     List<ConversationSummaryRow> findConversationSummaries(@Param("userId") UUID userId);
 
+    /** Every conversation id two people have ever shared. Folds repeat matches into one thread
+     *  once they are friends -- see ConversationService#historyFor. */
+    @Query(value = """
+            select p1.conversation_id
+            from conversation_participants p1
+            join conversation_participants p2
+                              on p2.conversation_id = p1.conversation_id
+                             and p2.user_id = :userB
+            where p1.user_id = :userA
+            """, nativeQuery = true)
+    List<UUID> findConversationIdsBetween(@Param("userA") UUID userA, @Param("userB") UUID userB);
+
     interface ConversationSummaryRow {
         UUID getConversationId();
 
