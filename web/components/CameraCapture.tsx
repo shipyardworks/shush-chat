@@ -22,6 +22,9 @@ export const CameraCapture = ({
   const video = useRef<HTMLVideoElement>(null);
   const stream = useRef<MediaStream | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // false = back camera, the default -- what people point at things.
+  const [front, setFront] = useState(false);
+  const [canSwitch, setCanSwitch] = useState(false);
 
   const stop = useCallback(() => {
     stream.current?.getTracks().forEach((track) => track.stop());
@@ -34,8 +37,7 @@ export const CameraCapture = ({
     const open = async () => {
       try {
         const media = await navigator.mediaDevices.getUserMedia({
-          // The back camera where there is a choice, which is what people point at things.
-          video: { facingMode: "environment" },
+          video: { facingMode: front ? "user" : "environment" },
           audio: false,
         });
         if (cancelled) {
@@ -49,6 +51,11 @@ export const CameraCapture = ({
             // Autoplay can be refused; the controls still work and the frame still arrives.
           });
         }
+        // Enumerated only after a stream is granted -- device info is hidden before that.
+        const devices = await navigator.mediaDevices.enumerateDevices().catch(() => []);
+        if (!cancelled) {
+          setCanSwitch(devices.filter((device) => device.kind === "videoinput").length > 1);
+        }
       } catch {
         // Refused, or there is no camera. Say so rather than showing a black rectangle.
         setError("No camera available, or permission was refused.");
@@ -60,7 +67,7 @@ export const CameraCapture = ({
       cancelled = true;
       stop();
     };
-  }, [stop]);
+  }, [front, stop]);
 
   const shoot = () => {
     const source = video.current;
@@ -101,6 +108,24 @@ export const CameraCapture = ({
         <span className="text-sm" style={{ color: "var(--color-muted)" }}>
           {error ?? "Camera"}
         </span>
+        <span className="flex-1" />
+        {canSwitch && !error && (
+          <button
+            id="switchCamera"
+            type="button"
+            aria-label={front ? "Switch to back camera" : "Switch to front camera"}
+            title="Switch camera"
+            onClick={() => {
+              stop();
+              setFront((current) => !current);
+            }}
+            className="btn-ghost grid h-9 w-9 place-items-center rounded-full p-0"
+          >
+            <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M17 2l4 4-4 4M7 22l-4-4 4-4M3 6h9a5 5 0 0 1 5 5v1M21 18H12a5 5 0 0 1-5-5v-1" />
+            </svg>
+          </button>
+        )}
       </div>
 
       <div className="flex min-h-0 flex-1 items-center justify-center overflow-hidden px-4">
