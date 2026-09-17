@@ -3,6 +3,9 @@
 Real-time 1:1 chat. Strangers are matched on shared interests, talk, and can keep each other as
 friends.
 
+**Live at [shushchat.syamdev.site](https://shushchat.syamdev.site)** — seeded test users only,
+per `aim.md`'s non-goals; not a public launch.
+
 **This is a portfolio and interview artifact, not a product.** Its purpose is to make one claim
 and then prove it:
 
