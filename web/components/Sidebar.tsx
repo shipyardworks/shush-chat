@@ -3,6 +3,7 @@
 import { useState } from "react";
 import type { Conversation, Friend, Session } from "@/lib/types";
 import { Avatar } from "./Avatar";
+import { Skeleton } from "./Skeleton";
 
 type Tab = "chats" | "friends";
 
@@ -10,8 +11,10 @@ export const Sidebar = ({
   session,
   friends,
   conversations,
+  loading,
   openConversationId,
   chatOnScreen,
+  hiddenOnPhone,
   onOpenFriend,
   onOpenConversation,
   onFindSomeone,
@@ -21,8 +24,11 @@ export const Sidebar = ({
   session: Session;
   friends: Friend[];
   conversations: Conversation[];
+  loading: boolean;
   openConversationId: string | null;
   chatOnScreen: boolean;
+  /** Hidden below the phone breakpoint while a chat or the setup panel is open full-screen. */
+  hiddenOnPhone?: boolean;
   onOpenFriend: (friend: Friend) => void;
   onOpenConversation: (conversation: Conversation) => void;
   onFindSomeone: () => void;
@@ -41,7 +47,7 @@ export const Sidebar = ({
   return (
     <aside
       id="sidebar"
-      className="flex min-h-0 flex-col border-r"
+      className={`min-h-0 flex-col border-r ${hiddenOnPhone ? "hidden sm:flex" : "flex"}`}
       style={{ borderColor: "var(--color-line-soft)" }}
     >
       <div className="flex-none p-4 pb-3">
@@ -100,7 +106,9 @@ export const Sidebar = ({
       {/* Only this scrolls. The tabs above and the account box below stay put -- a list that
           is any length should never be able to push "Save your account" off the bottom. */}
       <div className="scroll-elegant min-h-0 flex-1 overflow-y-auto px-4">
-        {tab === "chats" ? (
+        {loading ? (
+          <Skeleton />
+        ) : tab === "chats" ? (
           <ul id="chats" className="m-0 flex list-none flex-col gap-1 p-0">
             {conversations.map((conversation) => {
               const onScreenNow = chatOnScreen && conversation.id === openConversationId;
@@ -194,14 +202,19 @@ export const Sidebar = ({
       {session.user.anonymous ? (
         <div
           id="saveBox"
-          className="flex-none border-t p-4"
+          className="flex-none border-t p-2.5 sm:p-4"
           style={{ borderColor: "var(--color-line-soft)" }}
         >
           <h2 className="section-label">Save your account</h2>
-          <p className="mb-2.5 text-[13px]" style={{ color: "var(--color-faint)" }}>
+          {/* Full explanation on tablet and up; a phone screen with an otherwise-empty list
+              does not need three lines of copy sitting under every chat that could fit here. */}
+          <p
+            className="mb-2 hidden text-[13px] sm:mb-2.5 sm:block"
+            style={{ color: "var(--color-faint)" }}
+          >
             This exists only in this browser. Clear it, and it is gone — save it to keep it safe.
           </p>
-          <div className="flex flex-col gap-2">
+          <div className="flex flex-col gap-1.5 sm:gap-2">
             <input
               id="email"
               type="email"
@@ -231,7 +244,7 @@ export const Sidebar = ({
       ) : (
         <div
           id="accountBox"
-          className="flex-none border-t p-4"
+          className="flex-none border-t p-2.5 sm:p-4"
           style={{ borderColor: "var(--color-line-soft)" }}
         >
           <h2 className="section-label">Signed in</h2>
