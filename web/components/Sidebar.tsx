@@ -27,7 +27,8 @@ export const Sidebar = ({
   loading: boolean;
   openConversationId: string | null;
   chatOnScreen: boolean;
-  /** Hidden below the phone breakpoint while a chat or the setup panel is open full-screen. */
+  /** Below the phone breakpoint, slid off-screen (as a drawer, not display:none) while a chat
+   *  or the setup panel is open. */
   hiddenOnPhone?: boolean;
   onOpenFriend: (friend: Friend) => void;
   onOpenConversation: (conversation: Conversation) => void;
@@ -47,8 +48,13 @@ export const Sidebar = ({
   return (
     <aside
       id="sidebar"
-      className={`min-h-0 flex-col border-r ${hiddenOnPhone ? "hidden sm:flex" : "flex"}`}
-      style={{ borderColor: "var(--color-line-soft)" }}
+      /* Below sm this is a drawer over the chat behind it, not a separate full-screen page --
+         it only covers ~78% so the sliver (plus the backdrop in page.tsx) stays tappable to
+         dismiss it. sm and up: back to a normal static grid column, same as before. */
+      className={`absolute inset-y-0 left-0 z-30 flex w-[78%] max-w-[340px] min-h-0 flex-col border-r shadow-xl transition-transform duration-200 ease-out sm:static sm:inset-auto sm:z-auto sm:w-auto sm:max-w-none sm:translate-x-0 sm:shadow-none sm:transition-none ${
+        hiddenOnPhone ? "-translate-x-full pointer-events-none sm:pointer-events-auto" : "translate-x-0"
+      }`}
+      style={{ borderColor: "var(--color-line-soft)", backgroundColor: "var(--color-ink)" }}
     >
       <div className="flex-none p-4 pb-3">
         {/* A segmented control, not two independent buttons: exactly one of these is ever

@@ -52,7 +52,12 @@ export default function Chat() {
   const chatOpenOnPhone = mobileView === "detail" && shush.view === "chat";
 
   return (
-    <div className="grid h-full grid-rows-[auto_1fr]">
+    // flex, not a 2-row grid: a grid-rows-[auto_1fr] here put main in row 2 by explicit template,
+    // but when header goes display:none on phone it stops being a grid item at all -- main then
+    // auto-places into row 1 (auto-height, sized to its own content) and row 2's real 1fr space
+    // sits empty below it. A hidden flex sibling is just removed from flow instead, so the
+    // remaining item still grows to fill every time, regardless of which siblings are shown.
+    <div className="flex h-full flex-col">
       <header
         className={`relative z-10 items-center gap-3.5 border-b px-5 py-3.5 backdrop-blur-xl ${
           chatOpenOnPhone ? "hidden sm:flex" : "flex"
@@ -116,7 +121,7 @@ export default function Chat() {
       </header>
 
       <main
-        className={`grid min-h-0 ${
+        className={`relative grid min-h-0 flex-1 ${
           signedIn ? "grid-cols-1 sm:grid-cols-[240px_1fr] lg:grid-cols-[272px_1fr]" : "grid-cols-1"
         }`}
       >
@@ -146,7 +151,18 @@ export default function Chat() {
           />
         )}
 
-        <section className={`min-h-0 flex-col ${mobileView === "list" ? "hidden sm:flex" : "flex"}`}>
+        {/* The drawer only covers ~78% of the screen -- this is the rest of it, tapping
+            anywhere on it (the visible sliver of chat, or the dimmed part over it) closes the
+            drawer instead of the chat behind it having no way back without it. */}
+        {shush.session && mobileView === "list" && (
+          <div
+            className="absolute inset-0 z-20 sm:hidden"
+            style={{ backgroundColor: "rgb(4 5 9 / 0.4)" }}
+            onClick={() => setMobileView("detail")}
+          />
+        )}
+
+        <section className="flex min-h-0 flex-col">
           {!signedIn && <div className="min-h-0 flex-1" />}
 
           {signedIn && shush.view === "setup" && setup(false)}
