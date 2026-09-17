@@ -14,6 +14,7 @@ export const ChatPanel = ({
   typing,
   isFriendConversation,
   ended,
+  friendRequestSent,
   replyingTo,
   quotedFor,
   onOpenPeer,
@@ -29,6 +30,7 @@ export const ChatPanel = ({
   onHideForMe,
   onOpenImage,
   onOpenCamera,
+  onBack,
   setupPanel,
 }: {
   peer: Peer;
@@ -37,6 +39,7 @@ export const ChatPanel = ({
   typing: boolean;
   isFriendConversation: boolean;
   ended: boolean;
+  friendRequestSent: boolean;
   replyingTo: Message | null;
   quotedFor: (seq: number | null | undefined) => Message | null;
   onOpenPeer: () => void;
@@ -52,6 +55,8 @@ export const ChatPanel = ({
   onHideForMe: (message: Message) => void;
   onOpenImage: (mediaKey: string) => void;
   onOpenCamera: () => void;
+  /** Phone only -- returns to the sidebar list without closing the conversation underneath it. */
+  onBack?: () => void;
   setupPanel: React.ReactNode;
 }) => {
   const [draft, setDraft] = useState("");
@@ -88,9 +93,22 @@ export const ChatPanel = ({
   return (
     <div id="chat" className="flex min-h-0 flex-1 flex-col">
       <div
-        className="flex items-center gap-3 border-b py-3.5"
-        style={{ borderColor: "var(--color-line-soft)", paddingLeft: 22, paddingRight: 22 }}
+        className="flex items-center gap-2 border-b px-3.5 py-3.5 sm:gap-3 sm:px-[22px]"
+        style={{ borderColor: "var(--color-line-soft)" }}
       >
+        {onBack && (
+          <button
+            id="chatBack"
+            type="button"
+            aria-label="Back to chats"
+            onClick={onBack}
+            className="btn-ghost -ml-1 grid h-9 w-9 flex-none place-items-center rounded-full p-0 sm:hidden"
+          >
+            <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M15 18l-6-6 6-6" />
+            </svg>
+          </button>
+        )}
         <button id="chatAvatar" type="button" title="View profile" onClick={onOpenPeer}>
           <Avatar id={peer.userId} name={peer.name} />
         </button>
@@ -101,11 +119,14 @@ export const ChatPanel = ({
           onClick={onOpenPeer}
           className="min-w-0 text-left"
         >
-          <h2 id="chatHeading" className="m-0 text-[15px] font-semibold">
+          <h2 id="chatHeading" className="m-0 truncate text-[15px] font-semibold">
             {peer.heading}
           </h2>
-          <div id="chatSub" className="text-xs" style={{ color: "var(--color-faint)" }}>
-            {peer.sub}
+          {/* The same slot does double duty: "Typing…" while it's happening, otherwise whatever
+              this line would say anyway (online/offline/stranger/shared interests). One line of
+              status, not two, and nothing about it needs a fixed spot lower in the panel. */}
+          <div id="chatSub" className="truncate text-xs" style={{ color: "var(--color-faint)" }}>
+            {typing ? "Typing…" : peer.sub}
           </div>
         </button>
         <span className="flex-1" />
@@ -113,13 +134,35 @@ export const ChatPanel = ({
         {!isFriendConversation && (
           <>
             {/* Still offered after somebody leaves: asking to keep them is the one thing a
-                finished stranger conversation is still for. */}
-            <button id="addFriend" type="button" className="btn-ghost" onClick={onAskToKeep}>
-              Add friend
+                finished stranger conversation is still for. Icon-only on phone -- two full-text
+                pills left no room for the peer's own name. */}
+            <button
+              id="addFriend"
+              type="button"
+              title={friendRequestSent ? "Request sent" : "Add friend"}
+              aria-label={friendRequestSent ? "Request sent" : "Add friend"}
+              disabled={friendRequestSent}
+              className="btn-ghost flex h-9 flex-none items-center justify-center gap-1.5 rounded-full px-2.5 disabled:opacity-50 sm:px-3.5"
+              onClick={onAskToKeep}
+            >
+              <svg viewBox="0 0 24 24" className="h-4 w-4 flex-none" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 5v14M5 12h14" />
+              </svg>
+              <span className="hidden sm:inline">{friendRequestSent ? "Request sent" : "Add friend"}</span>
             </button>
             {!ended && (
-              <button id="leave" type="button" className="btn-ghost" onClick={onLeave}>
-                Leave
+              <button
+                id="leave"
+                type="button"
+                title="Leave"
+                aria-label="Leave"
+                className="btn-ghost flex h-9 flex-none items-center justify-center gap-1.5 rounded-full px-2.5 sm:px-3.5"
+                onClick={onLeave}
+              >
+                <svg viewBox="0 0 24 24" className="h-4 w-4 flex-none" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9" />
+                </svg>
+                <span className="hidden sm:inline">Leave</span>
               </button>
             )}
           </>
@@ -139,14 +182,6 @@ export const ChatPanel = ({
         onHideForMe={onHideForMe}
         onOpenImage={onOpenImage}
       />
-
-      <p
-        id="typingIndicator"
-        className="mx-5 mb-2 min-h-4 text-xs"
-        style={{ color: "var(--color-muted)" }}
-      >
-        {typing ? "They are typing…" : ""}
-      </p>
 
       {replyingTo && (
         <div

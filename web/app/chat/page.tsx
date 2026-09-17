@@ -1,7 +1,6 @@
 "use client";
 
-import { useState } from "react";
-import Link from "next/link";
+import { useEffect, useState } from "react";
 import { Avatar } from "@/components/Avatar";
 import { Brand } from "@/components/Brand";
 import { AttachmentPreview } from "@/components/AttachmentPreview";
@@ -25,6 +24,12 @@ export default function Chat() {
   const [profile, setProfile] = useState<ProfileTarget | null>(null);
   const [viewing, setViewing] = useState<string | null>(null);
   const [cameraOpen, setCameraOpen] = useState(false);
+  // Phone only -- below sm both panes always show. A visibility switch, not a second state.
+  const [mobileView, setMobileView] = useState<"list" | "detail">("list");
+
+  useEffect(() => {
+    setMobileView("detail");
+  }, [shush.view, shush.conversationId]);
 
   const setup = (bare: boolean) => (
     <SetupPanel
@@ -39,15 +44,19 @@ export default function Chat() {
       findStatus={shush.findStatus}
       onFind={shush.findSomeone}
       bare={bare}
+      onBack={bare ? undefined : () => setMobileView("list")}
     />
   );
 
   const signedIn = Boolean(shush.session);
+  const chatOpenOnPhone = mobileView === "detail" && shush.view === "chat";
 
   return (
     <div className="grid h-full grid-rows-[auto_1fr]">
       <header
-        className="relative z-10 flex items-center gap-3.5 border-b px-5 py-3.5 backdrop-blur-xl"
+        className={`relative z-10 items-center gap-3.5 border-b px-5 py-3.5 backdrop-blur-xl ${
+          chatOpenOnPhone ? "hidden sm:flex" : "flex"
+        }`}
         style={{
           borderColor: "var(--color-line-soft)",
           backgroundColor: "color-mix(in srgb, var(--color-surface) 70%, transparent)",
@@ -107,35 +116,38 @@ export default function Chat() {
       </header>
 
       <main
-        className="grid min-h-0"
-        style={{ gridTemplateColumns: signedIn ? "272px 1fr" : "1fr" }}
+        className={`grid min-h-0 ${
+          signedIn ? "grid-cols-1 sm:grid-cols-[240px_1fr] lg:grid-cols-[272px_1fr]" : "grid-cols-1"
+        }`}
       >
         {shush.session && (
           <Sidebar
             session={shush.session}
             friends={shush.friends}
             conversations={shush.conversations}
+            loading={shush.listsLoading}
             openConversationId={shush.conversationId}
             chatOnScreen={shush.view === "chat"}
-            onOpenFriend={shush.openFriend}
-            onOpenConversation={shush.openConversationFromHistory}
-            onFindSomeone={shush.goHome}
+            hiddenOnPhone={mobileView === "detail"}
+            onOpenFriend={(friend) => {
+              setMobileView("detail");
+              shush.openFriend(friend);
+            }}
+            onOpenConversation={(conversation) => {
+              setMobileView("detail");
+              shush.openConversationFromHistory(conversation);
+            }}
+            onFindSomeone={() => {
+              setMobileView("detail");
+              shush.goHome();
+            }}
             onSaveAccount={shush.saveAccount}
             onLogout={shush.logout}
           />
         )}
 
-        <section className="flex min-h-0 flex-col">
-          {!signedIn && (
-            <div className="grid min-h-0 flex-1 place-items-center p-6">
-              <p style={{ color: "var(--color-muted)" }}>
-                Getting you a name…{" "}
-                <Link href="/" className="underline">
-                  go back
-                </Link>
-              </p>
-            </div>
-          )}
+        <section className={`min-h-0 flex-col ${mobileView === "list" ? "hidden sm:flex" : "flex"}`}>
+          {!signedIn && <div className="min-h-0 flex-1" />}
 
           {signedIn && shush.view === "setup" && setup(false)}
 
@@ -147,6 +159,8 @@ export default function Chat() {
               typing={shush.typing}
               isFriendConversation={shush.isFriendConversation}
               ended={shush.ended}
+              friendRequestSent={shush.friendRequestSent}
+              onBack={() => setMobileView("list")}
               onOpenPeer={() =>
                 setProfile({
                   userId: shush.peer.userId,
@@ -155,7 +169,7 @@ export default function Chat() {
                     ? shush.currentFriend.online
                       ? "Online"
                       : "Offline"
-                    : "You have not kept this person",
+                    : "A stranger you talked to",
                   mine: false,
                   friend: Boolean(shush.currentFriend),
                 })
@@ -205,6 +219,7 @@ export default function Chat() {
         target={profile}
         onClose={() => setProfile(null)}
         onRemoveFriend={shush.removeFriend}
+        onBlock={shush.blockUser}
       />
     </div>
   );
