@@ -2,6 +2,7 @@
 
 import { useLayoutEffect, useRef, useState } from "react";
 import { clockTime } from "@/lib/time";
+import { positionPopover } from "@/lib/menuPosition";
 import type { Delivery, Message } from "@/lib/types";
 import { ChatImage } from "./ChatImage";
 import { EmojiPicker } from "./EmojiPicker";
@@ -10,6 +11,9 @@ import { Ticks } from "./Ticks";
 /** Far enough that it cannot be a scroll, close enough to be one flick of a thumb. */
 const SWIPE_TO_REPLY = 60;
 const LONG_PRESS_MS = 450;
+
+/** What is open above a message, if anything. Exactly one at a time. */
+type PopoverMode = "menu" | "picker" | "sheet" | null;
 
 const Quoted = ({
   message,
@@ -68,57 +72,54 @@ export const MessageBubble = ({
   onJumpToQuoted: (seq: number) => void;
   onOpenImage: (key: string) => void;
 }) => {
-  const [menuOpen, setMenuOpen] = useState(false);
-  const [pickerOpen, setPickerOpen] = useState(false);
+  const [mode, setMode] = useState<PopoverMode>(null);
   const [offset, setOffset] = useState(0);
   /** Viewport coordinates for the open popover, or null until they have been measured. */
   const [at, setAt] = useState<{ left: number; top: number } | null>(null);
 
   const row = useRef<HTMLDivElement>(null);
-  const menu = useRef<HTMLDivElement>(null);
+  const bubble = useRef<HTMLDivElement>(null);
+  const popover = useRef<HTMLDivElement>(null);
   const dots = useRef<HTMLButtonElement>(null);
   const startX = useRef(0);
   const dragging = useRef(false);
   const longPress = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const longPressTouch = useRef(false);
   const moved = useRef(false);
 
   const myReaction = (message.reactions ?? []).find((r) => r.userId === meId)?.emoji ?? null;
   const isImage = message.kind === "image" && Boolean(message.mediaKey) && !message.deleted;
 
   /**
-   * Positions the popover next to the dots that opened it, in viewport coordinates.
-   *
-   * <p>Anchored inside the row, it was positioned against a full-width row rather than the
-   * button, so it drifted across the bubble and off the edge of the window. Fixed coordinates
-   * measured from the button are the only version of this that holds for a bubble anywhere on
-   * screen: it opens away from the bubble -- left of the dots for your own messages, right of
-   * them for theirs -- and is then clamped so it cannot leave the viewport in either axis.
-   *
-   * <p>Measured in a layout effect, before paint, so it never appears in the wrong place first.
+   * Positions the popover next to whatever opened it, in viewport coordinates, using the one
+   * shared rule set in lib/menuPosition.ts: desktop opens beside the dots button, touch opens
+   * above or below the bubble itself -- either way clamped into the viewport and never
+   * overlapping its own anchor. Measured in a layout effect, before paint, so it never appears
+   * in the wrong place first.
    */
   useLayoutEffect(() => {
-    if (!menuOpen && !pickerOpen) {
+    if (!mode) {
       setAt(null);
       return;
     }
-    const button = dots.current?.getBoundingClientRect();
-    const box = menu.current?.getBoundingClientRect();
-    if (!button) return;
+    const anchorEl = mode === "sheet" ? bubble.current : dots.current;
+    const anchor = anchorEl?.getBoundingClientRect();
+    if (!anchor) return;
 
-    const width = box?.width ?? (menuOpen ? 176 : 260);
-    const height = box?.height ?? (menuOpen ? 180 : 46);
-    const margin = 8;
+    const box = popover.current?.getBoundingClientRect();
+    const fallback = { menu: [176, 180], picker: [260, 46], sheet: [230, 150] }[mode];
+    const size = { width: box?.width ?? fallback[0], height: box?.height ?? fallback[1] };
+    const viewport = { width: window.innerWidth, height: window.innerHeight };
 
-    // Away from the bubble: yours sit on the right, so the menu goes left, and the other way
-    // round for theirs.
-    let left = mine ? button.left - width - 6 : button.right + 6;
-    left = Math.min(Math.max(margin, left), window.innerWidth - width - margin);
-
-    let top = button.top + button.height / 2 - height / 2;
-    top = Math.min(Math.max(margin, top), window.innerHeight - height - margin);
-
-    setAt({ left, top });
-  }, [menuOpen, pickerOpen, mine]);
+    setAt(
+      positionPopover(
+        anchor,
+        size,
+        viewport,
+        mode === "sheet" ? { mode: "stack" } : { mode: "side", mine },
+      ),
+    );
+  }, [mode, mine]);
 
   const cancelLongPress = () => {
     if (longPress.current) {
@@ -130,15 +131,19 @@ export const MessageBubble = ({
   /**
    * Swipe to reply, in the direction the bubble sits: your own messages pull left, theirs pull
    * right. Anything else is a scroll, so a vertical-ish drag cancels rather than fights it.
+   *
+   * <p>Long press opens the picker on a mouse, the combined sheet on touch -- the dots button
+   * already covers the full menu for a mouse, so touch is the only pointer that needs both.
    */
   const onPointerDown = (event: React.PointerEvent) => {
     if (message.deleted) return;
     startX.current = event.clientX;
     dragging.current = true;
     moved.current = false;
+    longPressTouch.current = event.pointerType === "touch";
     cancelLongPress();
     longPress.current = setTimeout(() => {
-      if (!moved.current) setPickerOpen(true);
+      if (!moved.current) setMode(longPressTouch.current ? "sheet" : "picker");
     }, LONG_PRESS_MS);
   };
 
@@ -164,8 +169,7 @@ export const MessageBubble = ({
   };
 
   const act = (run: () => void) => () => {
-    setMenuOpen(false);
-    setPickerOpen(false);
+    setMode(null);
     run();
   };
 
@@ -184,6 +188,23 @@ export const MessageBubble = ({
     visibility: at ? "visible" : "hidden",
   };
 
+  const menuItems = (
+    <>
+      <MenuItem testId="menuReply" label="Reply" onClick={act(onReply)} />
+      <MenuItem testId="menuCopy" label="Copy" onClick={act(copy)} />
+      {mode === "menu" && (
+        <MenuItem testId="menuReact" label="React" onClick={() => setMode("picker")} />
+      )}
+      {/* Yours deletes for both; theirs only for you. Two different acts, so two labels. */}
+      <MenuItem
+        testId="menuDelete"
+        label={mine ? "Delete for everyone" : "Delete for me"}
+        danger
+        onClick={act(mine ? onDeleteForEveryone : onHideForMe)}
+      />
+    </>
+  );
+
   return (
     <div
       ref={row}
@@ -192,6 +213,7 @@ export const MessageBubble = ({
       style={{ justifyContent: mine ? "flex-end" : "flex-start" }}
     >
       <div
+        ref={bubble}
         data-testid="message"
         data-seq={message.seq ?? ""}
         data-mine={mine}
@@ -227,7 +249,7 @@ export const MessageBubble = ({
         }}
         onContextMenu={(event) => {
           event.preventDefault();
-          if (!message.deleted) setMenuOpen(true);
+          if (!message.deleted) setMode("menu");
         }}
       >
         <div style={{ padding: isImage && quoted ? "6px 8px 0" : undefined }}>
@@ -289,7 +311,7 @@ export const MessageBubble = ({
           <button
             type="button"
             data-testid="reactions"
-            onClick={() => setPickerOpen(true)}
+            onClick={() => setMode("picker")}
             className="absolute -bottom-3 z-10 flex cursor-pointer items-center gap-0.5 rounded-full border px-1.5 py-0.5 text-[12px] shadow-md"
             style={{
               [mine ? "right" : "left"]: 8,
@@ -310,15 +332,16 @@ export const MessageBubble = ({
         )}
       </div>
 
-      {/* The desktop way in. On a phone it is a long press, which opens the picker directly. */}
+      {/* The desktop way in. pointer-coarse:hidden guarantees it never shows on touch, rather
+          than relying on group-hover to simply never fire there. */}
       {!message.deleted && (
         <button
           ref={dots}
           type="button"
           data-testid="messageMenuButton"
           aria-label="Message actions"
-          onClick={() => setMenuOpen((open) => !open)}
-          className="self-center opacity-0 transition group-hover:opacity-60 hover:!opacity-100"
+          onClick={() => setMode((current) => (current === "menu" ? null : "menu"))}
+          className="pointer-coarse:hidden pointer-fine:opacity-0 pointer-fine:hover:!opacity-100 self-center transition pointer-fine:group-hover:opacity-60"
           style={{ order: mine ? -1 : 1, padding: "0 6px", color: "var(--color-muted)" }}
         >
           <svg viewBox="0 0 24 24" className="h-4 w-4" fill="currentColor">
@@ -329,54 +352,56 @@ export const MessageBubble = ({
         </button>
       )}
 
-      {(menuOpen || pickerOpen) && (
-        <div
-          className="fixed inset-0 z-40"
-          onClick={() => {
-            setMenuOpen(false);
-            setPickerOpen(false);
-          }}
-        />
-      )}
+      {/* Not portaled: this needs to stay a DOM descendant of #messages for a click there to
+          register as "inside" it, and a message row has no backdrop-blur/transform ancestor to
+          fight (unlike RequestsMenu's dropdown, which sits under the header). */}
+      {mode && (
+        <>
+          {/* Closes on an outside click. No dim/blur, on purpose -- the thread stays visible. */}
+          <div className="fixed inset-0 z-40" onClick={() => setMode(null)} />
 
-      {pickerOpen && (
-        <div ref={menu} className="z-[70]" style={floating}>
-          <EmojiPicker chosen={myReaction} onPick={(emoji) => act(() => onReact(emoji))()} />
-        </div>
-      )}
+          {mode === "picker" && (
+            <div ref={popover} className="z-[70]" style={floating}>
+              <EmojiPicker chosen={myReaction} onPick={(emoji) => act(() => onReact(emoji))()} />
+            </div>
+          )}
 
-      {menuOpen && (
-        <div
-          ref={menu}
-          data-testid="messageMenu"
-          /* Anchored to the dots that opened it, not to the far edge of the bubble: the
-             pointer is already there, and every pixel it has to travel is friction. */
-          className="z-[70] flex min-w-44 flex-col overflow-hidden rounded-xl border py-1 shadow-xl"
-          style={{
-            ...floating,
-            borderColor: "var(--color-line)",
-            backgroundColor: "var(--color-surface-2)",
-          }}
-          onClick={(event) => event.stopPropagation()}
-        >
-          <MenuItem testId="menuReply" label="Reply" onClick={act(onReply)} />
-          <MenuItem testId="menuCopy" label="Copy" onClick={act(copy)} />
-          <MenuItem
-            testId="menuReact"
-            label="React"
-            onClick={() => {
-              setMenuOpen(false);
-              setPickerOpen(true);
-            }}
-          />
-          {/* Yours deletes for both; theirs only for you. Two different acts, so two labels. */}
-          <MenuItem
-            testId="menuDelete"
-            label={mine ? "Delete for everyone" : "Delete for me"}
-            danger
-            onClick={act(mine ? onDeleteForEveryone : onHideForMe)}
-          />
-        </div>
+          {mode === "menu" && (
+            <div
+              ref={popover}
+              data-testid="messageMenu"
+              /* Anchored to the dots that opened it, not to the far edge of the bubble: the
+                 pointer is already there, and every pixel it has to travel is friction. */
+              className="z-[70] flex min-w-44 flex-col overflow-hidden rounded-xl border py-1 shadow-xl"
+              style={{
+                ...floating,
+                borderColor: "var(--color-line)",
+                backgroundColor: "var(--color-surface-2)",
+              }}
+              onClick={(event) => event.stopPropagation()}
+            >
+              {menuItems}
+            </div>
+          )}
+
+          {mode === "sheet" && (
+            <div
+              ref={popover}
+              data-testid="messageSheet"
+              className="z-[70] flex flex-col gap-2"
+              style={floating}
+              onClick={(event) => event.stopPropagation()}
+            >
+              <EmojiPicker chosen={myReaction} onPick={(emoji) => act(() => onReact(emoji))()} />
+              <div
+                className="flex min-w-44 flex-col overflow-hidden rounded-xl border py-1 shadow-xl"
+                style={{ borderColor: "var(--color-line)", backgroundColor: "var(--color-surface-2)" }}
+              >
+                {menuItems}
+              </div>
+            </div>
+          )}
+        </>
       )}
     </div>
   );
