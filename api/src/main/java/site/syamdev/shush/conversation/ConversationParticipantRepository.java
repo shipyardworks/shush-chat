@@ -111,6 +111,13 @@ public interface ConversationParticipantRepository
                 limit 1
             ) last on true
             where p.user_id = :userId
+              -- Hidden, not deleted: nothing under conversations/messages changes, so an unblock
+              -- feature later has everything still there to restore into view.
+              and not exists (
+                  select 1 from blocks b
+                  where (b.blocker_id = p.user_id and b.blocked_id = other.user_id)
+                     or (b.blocker_id = other.user_id and b.blocked_id = p.user_id)
+              )
             order by coalesce(last.created_at, c.created_at) desc
             """, nativeQuery = true)
     List<ConversationSummaryRow> findConversationSummaries(@Param("userId") UUID userId);

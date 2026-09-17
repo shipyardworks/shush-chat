@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { Avatar } from "./Avatar";
 
 export type ProfileTarget = {
@@ -15,11 +15,15 @@ export const ProfileDialog = ({
   target,
   onClose,
   onRemoveFriend,
+  onBlock,
 }: {
   target: ProfileTarget | null;
   onClose: () => void;
   onRemoveFriend: (userId: string) => Promise<void>;
+  onBlock: (userId: string) => Promise<void>;
 }) => {
+  const [confirmingBlock, setConfirmingBlock] = useState(false);
+
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") onClose();
@@ -27,6 +31,12 @@ export const ProfileDialog = ({
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, [onClose]);
+
+  // A fresh target -- a different person, or this same dialog opened again -- starts the
+  // confirm step over, rather than a reopened dialog silently remembering it was mid-block.
+  useEffect(() => {
+    setConfirmingBlock(false);
+  }, [target]);
 
   if (!target) return null;
 
@@ -68,6 +78,26 @@ export const ProfileDialog = ({
               }}
             >
               Remove friend
+            </button>
+          )}
+          {/* Works on a friend's profile too, not only a stranger's -- blocking is about who can
+              reach you, which has nothing to do with whether you had kept them. */}
+          {!target.mine && target.userId && (
+            <button
+              id="blockUser"
+              type="button"
+              className="btn-ghost"
+              style={{ color: "var(--color-danger)", borderColor: "rgb(251 113 133 / 0.4)" }}
+              onClick={async () => {
+                if (!confirmingBlock) {
+                  setConfirmingBlock(true);
+                  return;
+                }
+                await onBlock(target.userId!);
+                onClose();
+              }}
+            >
+              {confirmingBlock ? "Tap again to block — this can't be undone yet" : "Block"}
             </button>
           )}
           <button id="closeProfile" type="button" className="btn-ghost" onClick={onClose}>

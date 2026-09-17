@@ -65,6 +65,11 @@ export const api = {
 
   unfriend: (userId: string) => request(`/api/friends/${userId}`, { method: "DELETE" }),
 
+  /** Never matched again, and hidden everywhere -- but nothing about them is deleted. */
+  block: (userId: string) => request(`/api/blocks/${userId}`, { method: "POST" }),
+
+  unblock: (userId: string) => request(`/api/blocks/${userId}`, { method: "DELETE" }),
+
   /** Every conversation this person has had, newest first, strangers included. */
   conversations: () => json<Conversation[]>("/api/conversations"),
 
