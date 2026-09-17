@@ -147,6 +147,24 @@ const Ticker = ({ items, onToggle }: { items: Interest[]; onToggle: (id: number)
 /** Lowercase, one run of letters and digits, nothing else -- the same shape a curated tile has. */
 const normaliseTag = (label: string) => label.toLowerCase().replace(/[^a-z0-9]+/g, "");
 
+/**
+ * Below the Tailwind `sm` breakpoint, in sync with actual layout rather than guessed from
+ * `window.innerWidth` once. Drives which single tree of "rest" tiles mounts below -- rendering
+ * both and hiding one with CSS would leave two nodes sharing `data-interest-id`, which is a
+ * strict-mode locator collision in the desktop test suite regardless of which one is visible.
+ */
+const useIsPhone = () => {
+  const [phone, setPhone] = useState(false);
+  useEffect(() => {
+    const query = window.matchMedia("(max-width: 639.98px)");
+    setPhone(query.matches);
+    const onChange = (event: MediaQueryListEvent) => setPhone(event.matches);
+    query.addEventListener("change", onChange);
+    return () => query.removeEventListener("change", onChange);
+  }, []);
+  return phone;
+};
+
 export const SetupPanel = ({
   interests,
   selected,
@@ -178,6 +196,7 @@ export const SetupPanel = ({
   onBack?: () => void;
 }) => {
   const [draft, setDraft] = useState("");
+  const phone = useIsPhone();
 
   // Suggestions first, then everything else -- the useful ones are what a returning visitor
   // sees at the front of the strip.
@@ -240,7 +259,18 @@ export const SetupPanel = ({
             />
           </div>
 
-          {rest.length > 0 && <Ticker items={rest} onToggle={toggle} />}
+          {rest.length > 0 &&
+            (phone ? (
+              // Everything just wraps -- nothing depends on the scroll animation (unreliable
+              // against touch momentum scrolling) or runs past the screen edge.
+              <div className="flex flex-wrap items-center gap-2">
+                {rest.map((interest) => (
+                  <Tile key={interest.id} interest={interest} on={false} onClick={() => toggle(interest.id)} />
+                ))}
+              </div>
+            ) : (
+              <Ticker items={rest} onToggle={toggle} />
+            ))}
         </div>
       </div>
 
