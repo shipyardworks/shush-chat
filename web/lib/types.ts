@@ -55,8 +55,8 @@ export type Conversation = {
   lastAt: string | null;
 };
 
-/** How far a message has got, in the order it gets there. */
-export type Delivery = "pending" | "sent" | "delivered" | "read";
+/** How far a message has got, in the order it gets there. "failed" is terminal, not a step. */
+export type Delivery = "pending" | "sent" | "delivered" | "read" | "failed";
 
 export type ChatItem =
   | { kind: "message"; message: Message; delivery: Delivery }

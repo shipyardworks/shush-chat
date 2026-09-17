@@ -92,7 +92,8 @@ const remembered = () => {
 };
 
 /** Delivery only ever moves forward: a redelivered frame must not turn a read tick grey. */
-const RANK: Record<Delivery, number> = { pending: 0, sent: 1, delivered: 2, read: 3 };
+// "failed" ranks with "pending" so a late, legitimate ack can still win over it.
+const RANK: Record<Delivery, number> = { pending: 0, failed: 0, sent: 1, delivered: 2, read: 3 };
 const furthest = (a: Delivery, b: Delivery) => (RANK[b] > RANK[a] ? b : a);
 
 export type Peer = { userId: string | null; name: string | null; heading: string; sub: string };
@@ -122,6 +123,11 @@ export const useShush = () => {
   // Somebody walked out. The server decides this and says so in a frame; the client never
   // assumes it, which is exactly what went wrong when one side printed "You left" on its own.
   const [ended, setEnded] = useState(false);
+  // Disabled after the first ask, so a second click never round-trips to the server's own dedup.
+  const [friendRequestSent, setFriendRequestSent] = useState(false);
+  // True only until the first load resolves -- an empty array alone can't tell "still fetching"
+  // from "genuinely empty."
+  const [listsLoading, setListsLoading] = useState(true);
   const [attachment, setAttachment] = useState<Attachment | null>(null);
 
   const socket = useRef<WebSocket | null>(null);
@@ -242,24 +248,30 @@ export const useShush = () => {
     [],
   );
 
-  const openConversation = useCallback((id: string, next: Peer, friendConversation: boolean) => {
-    seen.current = new Set();
-    optimistic.current = new Set();
-    lastDay.current = null;
-    peerReadSeq.current = 0;
-    setItems([]);
-    setConversationId(id);
-    conversationRef.current = id;
-    setPeer(next);
-    setIsFriendConversation(friendConversation);
-    setReplyingTo(null);
-    setEnded(false);
-    setView("chat");
-    viewRef.current = "chat";
-    setFindStatus("");
-    setTyping(false);
-    if (hintTimer.current) clearTimeout(hintTimer.current);
-  }, []);
+  const openConversation = useCallback(
+    (id: string, next: Peer, friendConversation: boolean, endedAlready = false) => {
+      seen.current = new Set();
+      optimistic.current = new Set();
+      lastDay.current = null;
+      peerReadSeq.current = 0;
+      setItems([]);
+      setConversationId(id);
+      conversationRef.current = id;
+      setPeer(next);
+      setIsFriendConversation(friendConversation);
+      setReplyingTo(null);
+      setFriendRequestSent(false);
+      // The server already told us whether this one is over -- reopening one from history used
+      // to always start as if it were live, letting a send race the rejection.
+      setEnded(endedAlready);
+      setView("chat");
+      viewRef.current = "chat";
+      setFindStatus("");
+      setTyping(false);
+      if (hintTimer.current) clearTimeout(hintTimer.current);
+    },
+    [],
+  );
 
   /* ---------- frames ---------- */
 
@@ -452,7 +464,14 @@ export const useShush = () => {
       }
 
       if (type === "error") {
-        appendEvent(`Something went wrong: ${String(frame.message)}`);
+        const clientMsgId = frame.clientMsgId ? String(frame.clientMsgId) : null;
+        if (clientMsgId && optimistic.current.delete(clientMsgId)) {
+          // Ties the rejection to the one message it was about, instead of leaving it stuck
+          // on a pending clock with nothing left to ever advance it.
+          patchMessage({ clientMsgId }, (item) => ({ ...item, delivery: "failed" }));
+        } else {
+          appendEvent(`Something went wrong: ${String(frame.message)}`);
+        }
       }
     },
     [
@@ -526,6 +545,7 @@ export const useShush = () => {
     // All three before anything can be pushed, so a request or a chat that was already waiting
     // is on screen from the moment you sign in.
     await Promise.all([reloadFriends(), reloadRequests(), reloadConversations()]);
+    setListsLoading(false);
   }, [reloadConversations, reloadFriends, reloadRequests]);
 
   useEffect(() => {
@@ -542,6 +562,7 @@ export const useShush = () => {
       peerName: string | null;
       online?: boolean;
       isFriend: boolean;
+      ended?: boolean;
     }) => {
       openConversation(
         thread.conversationId,
@@ -552,6 +573,7 @@ export const useShush = () => {
           sub: thread.isFriend ? (thread.online ? "Online" : "Offline") : "A stranger you talked to",
         },
         thread.isFriend,
+        Boolean(thread.ended),
       );
 
       // How far they have read, before any history is drawn -- otherwise the whole backlog
@@ -610,6 +632,7 @@ export const useShush = () => {
         peerName: conversation.peerName,
         online: friendsRef.current.find((f) => f.userId === conversation.peerId)?.online,
         isFriend: conversation.kind === "friend",
+        ended: conversation.state === "ended",
       }),
     [openThread],
   );
@@ -794,14 +817,15 @@ export const useShush = () => {
   }, [conversationId, send]);
 
   const askToKeep = useCallback(async () => {
-    if (!conversationId) return;
+    if (!conversationId || friendRequestSent) return;
     const response = await api.askToKeep(conversationId);
+    if (response.ok) setFriendRequestSent(true);
     appendEvent(
       response.ok
         ? "Asked to keep them. You will hear back only if they say yes."
         : "You have already asked.",
     );
-  }, [appendEvent, conversationId]);
+  }, [appendEvent, conversationId, friendRequestSent]);
 
 
   const removeFriend = useCallback(
@@ -816,6 +840,26 @@ export const useShush = () => {
       if (peer.userId === userId) {
         setIsFriendConversation(false);
         setPeer((current) => ({ ...current, sub: "A stranger you talked to" }));
+      }
+    },
+    [peer.userId, refreshLists],
+  );
+
+  /**
+   * Never matched again (the matcher already excludes any blocked pair), and hidden from both
+   * lists from this point on -- but nothing is deleted, which is what leaves room for an unblock
+   * feature later without having lost anything in the meantime.
+   */
+  const blockUser = useCallback(
+    async (userId: string) => {
+      const response = await api.block(userId);
+      if (!response.ok) return;
+      await refreshLists();
+      if (peer.userId === userId) {
+        setView("setup");
+        viewRef.current = "setup";
+        setConversationId(null);
+        conversationRef.current = null;
       }
     },
     [peer.userId, refreshLists],
@@ -942,6 +986,7 @@ export const useShush = () => {
     friends,
     requests,
     conversations: strangerConversations,
+    listsLoading,
     interests,
     selected,
     setSelected: updateSelected,
@@ -955,6 +1000,7 @@ export const useShush = () => {
     items,
     conversationId,
     ended,
+    friendRequestSent,
     peer,
     currentFriend,
     isFriendConversation,
@@ -976,6 +1022,7 @@ export const useShush = () => {
     leave,
     askToKeep,
     removeFriend,
+    blockUser,
     saveAccount,
     logout,
     goHome,
