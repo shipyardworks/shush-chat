@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ChatItem, Message } from "@/lib/types";
 import { MessageBubble } from "./MessageBubble";
+import { MessageSkeleton } from "./Skeleton";
 
 /**
  * Date separators and system events share one pill on purpose: both are the room talking
@@ -26,6 +27,7 @@ const Pill = ({ children, muted }: { children: React.ReactNode; muted?: boolean 
 
 export const MessageList = ({
   items,
+  loading = false,
   meId,
   quotedFor,
   onReply,
@@ -36,6 +38,8 @@ export const MessageList = ({
   onBackgroundTap,
 }: {
   items: ChatItem[];
+  /** History is still on its way -- placeholders, not an empty pane. */
+  loading?: boolean;
   meId: string | undefined;
   quotedFor: (seq: number | null | undefined) => Message | null;
   onReply: (message: Message) => void;
@@ -91,7 +95,8 @@ export const MessageList = ({
       onClick={onBackgroundTap}
       className="scroll-elegant flex min-h-0 flex-1 flex-col gap-[3px] overflow-y-auto p-6"
     >
-      {items.map((item, index) => {
+      {loading && <MessageSkeleton />}
+      {!loading && items.map((item, index) => {
         if (item.kind === "day") {
           return (
             <Pill key={item.id} muted>

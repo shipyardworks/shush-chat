@@ -96,11 +96,15 @@ test("an ended conversation offers the way to the next one, as a modal over it",
   await expect(bob.locator("#endedPanel [data-testid=interest]")).toHaveCount(0);
   await expect(bob.locator("#findSomeoneModal")).toHaveCount(0);
 
-  // One click opens it as a modal over the finished conversation, which is still there
-  // underneath: closing without picking anyone leaves it exactly as it was.
+  // That it is over is said once, in the thread -- the footer is only the way on.
+  await expect(bob.locator("#endedPanel")).not.toContainText("over");
+  await expect(bob.locator("#messages")).toContainText("This conversation is over");
+
+  // One click opens it as a modal over the finished conversation, already searching; the
+  // thread is still there underneath, and closing the modal stops the search.
   await bob.locator("#findSomeoneNext").click();
   await expect(bob.locator("#findSomeoneModal [data-testid=interest]").first()).toBeVisible();
-  await expect(bob.locator("#findSomeoneModal #findSomeone")).toBeVisible();
+  await expect(bob.locator("#findSomeoneModal #findSomeone")).toHaveAttribute("aria-busy", "true");
   await bob.keyboard.press("Escape");
   await expect(bob.locator("#findSomeoneModal")).toHaveCount(0);
   await expect(bob.locator("#endedPanel")).toBeVisible();
@@ -244,4 +248,61 @@ test("the message menu opens towards the space that exists", async ({ browser })
   // And it opens beside the dots that summoned it, not across the bubble.
   const dots = (await alice.locator("[data-testid=messageMenuButton]").last().boundingBox())!;
   expect(Math.abs(box.x + box.width / 2 - (dots.x + dots.width / 2))).toBeLessThan(220);
+});
+
+test("an ended conversation reopened from the list says so in the thread, and only offers add friend", async ({
+  browser,
+}) => {
+  const alice = await arrive(browser);
+  const bob = await arrive(browser);
+  await matchThem(alice, bob);
+  await say(alice, "one thing before I go");
+  await expect(bob.locator("#messages")).toContainText("one thing before I go");
+  await alice.locator("#leave").click();
+  await expect(bob.locator("#endedPanel")).toBeVisible();
+
+  // History arrives slowly, so the loading state is there to be seen.
+  await bob.route("**/api/conversations/*/messages**", async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    await route.continue();
+  });
+  await bob.locator("#home").click();
+  await bob.locator("[data-testid=chat]").first().click();
+  await expect(bob.locator("#messagesLoading")).toBeVisible();
+  await expect(bob.locator("#messages")).toContainText("one thing before I go");
+  await expect(bob.locator("#messagesLoading")).toHaveCount(0);
+
+  await expect(bob.locator("#messages")).toContainText("This conversation is over.");
+  await expect(bob.locator("#endedPanel")).not.toContainText("over");
+  await expect(bob.locator("#composer")).toHaveCount(0);
+  await expect(bob.locator("#leave")).toHaveCount(0);
+  await expect(bob.locator("#addFriend")).toBeVisible();
+});
+
+test("the composer is a text box with icon buttons, and shift-enter makes a new line", async ({
+  browser,
+}) => {
+  const alice = await arrive(browser);
+  const bob = await arrive(browser);
+  await matchThem(alice, bob);
+
+  // A textarea: iOS never offers its password / card / address bar above one.
+  expect(await alice.locator("#composer").evaluate((node) => node.tagName)).toBe("TEXTAREA");
+  await expect(alice.locator("#send")).toHaveText("");
+  await expect(alice.locator("#send")).toHaveAttribute("aria-label", "Send");
+  const send = (await alice.locator("#send").boundingBox())!;
+  expect(send.width).toBeLessThanOrEqual(44);
+
+  await alice.locator("#composer").click();
+  await alice.keyboard.type("first line");
+  await alice.keyboard.press("Shift+Enter");
+  await alice.keyboard.type("second line");
+  await alice.keyboard.press("Enter");
+  const message = bob.locator("[data-testid=message]").filter({ hasText: "first line" });
+  await expect(message).toContainText("second line");
+  const lines = await message.locator("div.whitespace-pre-wrap").evaluate(
+    (node) => node.getBoundingClientRect().height / parseFloat(getComputedStyle(node).lineHeight),
+  );
+  expect(lines).toBeGreaterThan(1.5);
+  await expect(alice.locator("#composer")).toHaveValue("");
 });

@@ -158,7 +158,7 @@ test("replying quotes the message it answers, on both sides", async ({ browser }
   await expect(quotedForAlice).toContainText("the original");
 });
 
-test("a message offers exactly four actions", async ({ browser }) => {
+test("a message opens reactions and three actions together", async ({ browser }) => {
   const alice = await arrive(browser);
   const bob = await arrive(browser);
   await matchThem(alice, bob);
@@ -167,15 +167,24 @@ test("a message offers exactly four actions", async ({ browser }) => {
 
   await bubble(alice, "four options please").click({ button: "right" });
   const menu = alice.locator("[data-testid=messageMenu]");
-  await expect(menu.locator("button")).toHaveCount(4);
+  await expect(menu.locator("button")).toHaveCount(3);
+  // No "React" step: the emoji are already open above the actions.
+  await expect(alice.locator("[data-testid=messageActions] [data-testid=emojiPicker]")).toBeVisible();
+  await expect(alice.locator("[data-testid=menuReact]")).toHaveCount(0);
   await expect(alice.locator("[data-testid=menuDelete]")).toHaveText("Delete for everyone");
 
   await alice.keyboard.press("Escape");
   await alice.locator("body").click({ position: { x: 5, y: 5 } });
 
-  // The other person's message offers the same four, with the delete that means the other thing.
-  await bubble(bob, "four options please").click({ button: "right" });
-  await expect(bob.locator("[data-testid=messageMenu]").locator("button")).toHaveCount(4);
+  // The other person's message offers the same three, with the delete that means the other thing.
+  // The dots, not a right-click: both open the same thing.
+  await bubble(bob, "four options please").hover();
+  await bubble(bob, "four options please")
+    .locator("xpath=../..")
+    .locator("[data-testid=messageMenuButton]")
+    .click();
+  await expect(bob.locator("[data-testid=messageActions] [data-testid=emojiPicker]")).toBeVisible();
+  await expect(bob.locator("[data-testid=messageMenu]").locator("button")).toHaveCount(3);
   await expect(bob.locator("[data-testid=menuDelete]")).toHaveText("Delete for me");
 });
 
@@ -187,7 +196,6 @@ test("reacting shows on both sides and replaces rather than accumulates", async 
   await expect(bob.locator("#messages")).toContainText("react to me");
 
   await bubble(bob, "react to me").click({ button: "right" });
-  await bob.locator("[data-testid=menuReact]").click();
   await expect(bob.locator("[data-testid=emojiPicker]")).toBeVisible();
   await bob.locator("[data-testid=emojiOption]").first().click();
 

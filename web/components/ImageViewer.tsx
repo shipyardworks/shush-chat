@@ -21,7 +21,7 @@ export const ImageViewer = ({ mediaKey, onClose }: { mediaKey: string; onClose: 
     <div
       id="imageViewer"
       className="fixed inset-0 z-[60] flex flex-col"
-      style={{ backgroundColor: "rgb(4 5 9 / 0.94)" }}
+      style={{ backgroundColor: "var(--color-scrim-strong)" }}
       onClick={onClose}
     >
       <div className="flex items-center gap-3 p-4">

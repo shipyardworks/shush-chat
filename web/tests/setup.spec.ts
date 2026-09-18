@@ -133,23 +133,81 @@ test("find someone turns into the search itself, and tapping it again stops it",
   await expect(page.locator("#findStatus")).toHaveCount(0);
 });
 
-test("the same find button is used in the picker after a conversation ends", async ({ browser }) => {
+test("find someone after a conversation ends is already looking", async ({ browser }) => {
   const alice = await arrive(browser);
   const bob = await arrive(browser);
   await matchThem(alice, bob);
   await alice.locator("#leave").click();
+  await expect(bob.locator("#findSomeoneNext")).toHaveText("Find someone");
   await bob.locator("#findSomeoneNext").click();
 
+  // One press: the picker opens on the search itself, not on a second "Find someone".
   const modal = bob.locator("#findSomeoneModal");
-  await expect(modal.locator("#interestTicker")).toBeVisible();
-  await pickUniqueTag(bob);
-  await modal.locator("#findSomeone").click();
   await expect(modal.locator("#findSomeone")).toHaveAttribute("aria-busy", "true");
+  await expect(modal.locator("#interestTicker")).toBeVisible();
+  // The same button, and pressing it stops the search.
   await modal.locator("#findSomeone").click();
   await expect(modal.locator("#findSomeone")).toHaveText("Find someone");
 });
 
-test("the request count sits inside the requests icon", async ({ browser }) => {
+test("find someone in the sidebar starts looking, under one name everywhere", async ({ browser }) => {
+  const alice = await arrive(browser);
+  const bob = await arrive(browser);
+  await matchThem(alice, bob);
+  await expect(bob.locator("#newChat")).toHaveText("Find someone");
+
+  await bob.locator("#newChat").click();
+  await expect(bob.locator("#findSomeone")).toHaveAttribute("aria-busy", "true");
+  await bob.locator("#findSomeone").click();
+  await expect(bob.locator("#findSomeone")).toHaveAttribute("aria-busy", "false");
+  await expect(bob.locator("body")).not.toContainText("Find someone new");
+});
+
+test("typing an interest that is already a tile picks that tile instead of copying it", async ({
+  browser,
+}) => {
+  const page = await arrive(browser);
+  const tile = page.locator("#interestTicker [data-testid=interest]").first();
+  await expect(tile).toBeVisible();
+  const label = (await tile.innerText()).trim();
+
+  // Typed twice, and differently each time -- still one tile, the real one.
+  for (const typed of [label.toUpperCase(), ` ${label} `]) {
+    await page.locator("#addInterestInput").fill(typed);
+    await page.locator("#addInterestInput").press("Enter");
+  }
+  const chosen = page.locator('#interestTiles [data-testid=interest][aria-pressed="true"]');
+  await expect(chosen.filter({ hasText: new RegExp(`^${label}$`) })).toHaveCount(1);
+  await expect(page.locator("#addInterestInput")).toHaveValue("");
+});
+
+test("a copy of a tile saved by an older version is folded back into the tile", async ({
+  browser,
+}) => {
+  const page = await arrive(browser);
+  const tile = page.locator("#interestTicker [data-testid=interest]").first();
+  await expect(tile).toBeVisible();
+  const label = (await tile.innerText()).trim();
+
+  // What the old client left behind: private copies of a real tile, one of them twice.
+  await page.evaluate((word) => {
+    localStorage.setItem(
+      "shush.customInterests",
+      JSON.stringify([
+        { id: -1, label: word },
+        { id: -2, label: word },
+      ]),
+    );
+    localStorage.setItem("shush.selectedInterests", JSON.stringify([-1, -2]));
+  }, label);
+  await page.reload();
+
+  const chosen = page.locator('#interestTiles [data-testid=interest][aria-pressed="true"]');
+  await expect(chosen.filter({ hasText: new RegExp(`^${label}$`) })).toHaveCount(1);
+  expect(Number(await chosen.first().getAttribute("data-interest-id"))).toBeGreaterThan(0);
+});
+
+test("the requests button is a person and, once someone asks, a count", async ({ browser }) => {
   const alice = await arrive(browser);
   const bob = await arrive(browser);
   await matchThem(alice, bob);
@@ -181,7 +239,8 @@ test("the word 'stranger' never reaches the screen", async ({ browser }) => {
 
 test("an unsaved account gets one plain line and a button, not a form", async ({ browser }) => {
   const page = await arrive(browser);
-  await expect(page.locator("#saveStrip")).toBeVisible();
+  // At the foot of the sidebar, where "Signed in" appears once it is saved.
+  await expect(page.locator("#sidebar #saveStrip")).toBeVisible();
   await expect(page.locator("#saveWarning")).toContainText("will be lost");
   await expect(page.locator("#email")).toHaveCount(0);
 
@@ -196,4 +255,37 @@ test("an unsaved account gets one plain line and a button, not a form", async ({
   await page.locator("#saveAccount").click();
   await expect(page.locator("#saveStrip")).toHaveCount(0);
   await expect(page.locator("#accountBox")).toBeVisible();
+});
+
+test("stopping a search before it reaches the server leaves nobody waiting", async ({ browser }) => {
+  const ghost = await arrive(browser);
+  const seeker = await arrive(browser);
+  await expect(ghost.locator("#interestTicker [data-testid=interest]").first()).toBeVisible();
+  const id = await ghost
+    .locator("#interestTicker [data-testid=interest]")
+    .first()
+    .getAttribute("data-interest-id");
+  for (const page of [ghost, seeker]) {
+    await freezeTicker(page);
+    const tile = page.locator(`[data-interest-id="${id}"]`);
+    if ((await tile.getAttribute("aria-pressed")) !== "true") await tile.click({ force: true });
+    await page.getByRole("button", { name: "Forever" }).click();
+  }
+
+  // Saving the interests is slow, and the search is stopped while it is still in flight --
+  // the stop reaches the server before the find it was stopping.
+  await ghost.route("**/api/interests/mine", async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    await route.continue();
+  });
+  await ghost.locator("#findSomeone").click();
+  await ghost.locator("#findSomeone").click();
+  await expect(ghost.locator("#findSomeone")).toHaveAttribute("aria-busy", "false");
+  await ghost.waitForTimeout(2000);
+
+  // Somebody with the same interest searches. The ghost must not be in the pool to be found.
+  await seeker.locator("#findSomeone").click();
+  await seeker.waitForTimeout(4000);
+  await expect(ghost.locator("#chat")).toHaveCount(0);
+  await seeker.locator("#findSomeone").click();
 });

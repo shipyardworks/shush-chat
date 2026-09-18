@@ -44,7 +44,7 @@ export const ProfileDialog = ({
     <div
       id="profileBackdrop"
       className="fixed inset-0 z-50 grid place-items-center p-5 backdrop-blur-[3px]"
-      style={{ backgroundColor: "rgb(4 5 9 / 0.62)" }}
+      style={{ backgroundColor: "var(--color-scrim)" }}
       onClick={(event) => {
         if (event.target === event.currentTarget) onClose();
       }}
@@ -71,7 +71,7 @@ export const ProfileDialog = ({
               id="removeFriend"
               type="button"
               className="btn-ghost"
-              style={{ color: "var(--color-danger)", borderColor: "rgb(251 113 133 / 0.4)" }}
+              style={{ color: "var(--color-danger)", borderColor: "var(--color-danger-line)" }}
               onClick={async () => {
                 await onRemoveFriend(target.userId!);
                 onClose();
@@ -87,7 +87,7 @@ export const ProfileDialog = ({
               id="blockUser"
               type="button"
               className="btn-ghost"
-              style={{ color: "var(--color-danger)", borderColor: "rgb(251 113 133 / 0.4)" }}
+              style={{ color: "var(--color-danger)", borderColor: "var(--color-danger-line)" }}
               onClick={async () => {
                 if (!confirmingBlock) {
                   setConfirmingBlock(true);

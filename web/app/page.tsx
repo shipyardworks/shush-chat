@@ -30,7 +30,7 @@ export default function Landing() {
             Talk to{" "}
             <span
               style={{
-                backgroundImage: "linear-gradient(120deg, var(--color-brand), var(--color-cyan))",
+                backgroundImage: "var(--gradient-mark)",
                 WebkitBackgroundClip: "text",
                 backgroundClip: "text",
                 color: "transparent",

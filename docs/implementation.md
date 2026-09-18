@@ -7,9 +7,10 @@
 
 **Status: all eight phases complete**, plus three rounds of work that came after the plan was
 written: a platform split, a client rewrite, and feature work beyond the original phase 8 scope
-(message interactions, per-friend unread counts, unfriending, shared custom interests, and closing
-a real gap in how a conversation ends). Outstanding: the benchmark on dedicated hardware and the
-recorded demo (`deploy.md` §3 and §4), both of which need a machine that is not this laptop.
+(message interactions, per-friend unread counts, unfriending, shared custom interests, closing
+a real gap in how a conversation ends, and one open stranger conversation at a time).
+Outstanding: the benchmark on dedicated hardware and the recorded demo (`deploy.md` §3 and §4),
+both of which need a machine that is not this laptop.
 
 ---
 
@@ -36,9 +37,9 @@ presenting laptop figures as a headline number.
 
 | Suite | Count | Notes |
 | ----- | ----- | ----- |
-| Integration (`api`) | 186 | Real Postgres, Redis, Redpanda, Elasticsearch, MinIO via Testcontainers. Nothing mocked |
+| Integration (`api`) | 187 | Real Postgres, Redis, Redpanda, Elasticsearch, MinIO via Testcontainers. Nothing mocked |
 | Unit (`api`) | 9 | Pure logic only |
-| Browser (`web`, Playwright) | 33 | Journey, session, layout and interactions specs, against a stack that is already running |
+| Browser (`web`, Playwright) | 51 | Journey, session, setup, layout and interactions specs, against a stack that is already running |
 | Harness self-tests (`bench`) | 17 | Each invariant fed a violating stream, asserted to report it |
 | Isolation (`platform`) | 5 checks | Cross-tenant access attempted with real credentials |
 
@@ -140,6 +141,31 @@ times and then **skips the record** — silent message loss under database press
 system whose central claim is that nothing is lost. The writer now retries indefinitely, so a
 persistent failure stalls that partition instead.
 
+### A new match ends the stranger conversation it replaces
+
+`pre-plan.md` §3 says a conversation is with one person at a time, and nothing enforced it: every
+match left the previous one `active`, so the chat list filled with threads that still took
+messages, and one side could keep typing into a conversation the other had long since moved on
+from. `ConversationService#createMatched` (matching and invite links both go through it) now ends
+every open stranger conversation either person has, in the same transaction that creates the new
+one, and tells whoever was left behind with the same `left` frame Leave sends, after commit. Friend
+conversations are `kept`, never `active`, and are untouched.
+
+Migration `V10` applies the same rule to conversations already stuck open: an active stranger
+conversation ends if either of its people has a newer conversation. It changes `state` and
+`ended_at` only; nothing is deleted.
+
+Opening a friend does **not** end a live stranger conversation, although `pre-plan.md` §3 says it
+should. That rule was not asked for here, and ending someone's conversation because a row in the
+sidebar was clicked is not a change to make in passing.
+
+### The theme is a folder, not a block at the top of a stylesheet
+
+`web/theme/tokens.css` holds every colour, gradient, shadow and scrim; `web/theme/components.css`
+holds the shared controls (`btn`, `btn-primary`, `btn-icon`, `field`, `panel`, `badge`, the
+searching state). Components read `var(--…)` and write no literal colours. The cyan shield and
+the purple-to-cyan gradient on the save prompt were exactly what that rule exists to stop.
+
 ### `docs/SCHEMA.md` is generated
 
 Anticipated by `plan.md` §2.1 and now real: written by `SchemaDocIT` on every `./mvnw verify`,
@@ -180,6 +206,17 @@ Each was invisible to code review and would have shipped.
 | 24 | The message menu was positioned inside its row rather than against the button that opened it, and the attachment preview sized a tall image against a grid row that had already stretched to fit it — the last message's menu opened off the bottom of the window, and a tall photo pushed through its own caption box | bounding-box assertions across a tall, a wide, a square and a tiny image |
 | 25 | `backdrop-filter` on the header made it the containing block for the requests dropdown's fixed-position backdrop, silently confining the click-outside catcher to a thin strip under the header — clicking anywhere else in the page did nothing | `elementFromPoint` at the sidebar's coordinates |
 | 26 | nginx (in `platform`) resolves a proxied hostname once at startup; rebuilding the frontend container left it pointing at a dead IP, and every request came back 502 until nginx was restarted | 502s after a routine rebuild |
+| 27 | A match never ended the conversation before it, so old stranger threads stayed open and writable forever — the same pair could be talking in one and locked out of another | two screenshots of the same person's chat list |
+| 28 | Typing an interest that was already a tile made a private copy under its own id, so "history" rendered twice, and only one of the two could ever match anyone | a screenshot; now a test that types a tile's name twice |
+| 29 | `find` was sent only after the interests saved, so a Stop pressed in that gap reached the server first and the `find` after it — the screen said "not looking" while the server kept that person in the pool, to be matched with whoever searched next | a flaky unrelated test matching with the previous test's user; reproduced by a test that delays the save |
+| 30 | A history load that finished after another thread was opened appended its messages to that thread | reading the load path while adding its skeleton |
+| 31 | iOS offered its password / card / address AutoFill bar above the message box: it ignores `autocomplete="off"` on an `<input>` it cannot rule out as a form field. It never offers it for a `<textarea>` | a phone screenshot |
+| 32 | On the live domain every image upload failed with "could not reach image storage": uploads go from the browser straight to a URL presigned for `SHUSH_S3_PUBLIC_ENDPOINT`, and the platform only ever exposed MinIO on the box's loopback — plain http, unreachable from any phone and blocked under an https page anyway. It had only ever worked on localhost | a phone screenshot on the live site |
+
+**32 needs `platform` too.** The fix is a PUT-only `/shush-media/` route on the app's own origin
+(`platform/edge/nginx/conf.d/shush.conf`, with MinIO joining the edge network under the alias
+`syamdev-minio`), and `SHUSH_S3_PUBLIC_ENDPOINT` set to the site's own URL. The bytes still
+never touch the API; nginx forwards them to MinIO with the signed `Host` unchanged.
 
 Four of these are worth separating out, because the tests that "covered" them passed:
 
@@ -217,6 +254,7 @@ api/src/main/java/site/syamdev/shush/
   config/        security, Kafka, Redis, storage, node identity
 
 web/
+  theme/         tokens.css (every colour) and components.css (the shared controls)
   app/           landing page (server component) and the chat page
   components/    Sidebar, ChatPanel, MessageBubble, message actions, attachment preview,
                  camera capture, emoji picker, requests menu, theme toggle
