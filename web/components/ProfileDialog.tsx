@@ -80,7 +80,7 @@ export const ProfileDialog = ({
               Remove friend
             </button>
           )}
-          {/* Works on a friend's profile too, not only a stranger's -- blocking is about who can
+          {/* Works on a friend's profile too, not only someone you were matched with -- blocking is about who can
               reach you, which has nothing to do with whether you had kept them. */}
           {!target.mine && target.userId && (
             <button

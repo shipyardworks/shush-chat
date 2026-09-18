@@ -1,9 +1,60 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { api } from "@/lib/api";
 import type { FriendRequest } from "@/lib/types";
+
+const Person = () => (
+  <svg viewBox="0 0 12 12" className="h-[11px] w-[11px] flex-none" fill="currentColor" aria-hidden>
+    <circle cx="6" cy="3.4" r="2.4" />
+    <path d="M1.2 11.2c0-2.7 2.1-4.4 4.8-4.4s4.8 1.7 4.8 4.4Z" />
+  </svg>
+);
+
+/**
+ * A person inside a speech bubble: someone asking to talk to you again. With requests waiting,
+ * the bubble fills and the count sits inside it, so the number is part of the icon rather than
+ * a notification dot bolted onto its corner.
+ */
+const RequestsIcon = ({ count }: { count: number }) => {
+  // useId's delimiters are not safe inside url(#...), so keep only the plain characters.
+  const gradient = `requests${useId().replace(/[^a-zA-Z0-9_-]/g, "")}`;
+  if (count === 0) {
+    return (
+      <span className="relative block h-6 w-6" aria-hidden>
+        <svg viewBox="0 0 24 24" className="absolute inset-0 h-full w-full" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round">
+          <path d="M5.5 2.5h13a4 4 0 0 1 4 4v7a4 4 0 0 1-4 4H13l-4.5 4v-4h-3a4 4 0 0 1-4-4v-7a4 4 0 0 1 4-4Z" />
+        </svg>
+        <span className="absolute inset-x-0 top-[2.5px] flex h-[15px] items-center justify-center">
+          <Person />
+        </span>
+      </span>
+    );
+  }
+  return (
+    <span className="relative block h-6 w-[34px] text-white" aria-hidden>
+      <svg viewBox="0 0 34 24" className="absolute inset-0 h-full w-full">
+        <defs>
+          <linearGradient id={gradient} x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0" stopColor="var(--color-brand)" />
+            <stop offset="1" stopColor="var(--color-cyan)" />
+          </linearGradient>
+        </defs>
+        <path
+          d="M6 1.5h22a4.5 4.5 0 0 1 4.5 4.5v7.5a4.5 4.5 0 0 1-4.5 4.5H14.5l-5 4.5v-4.5H6a4.5 4.5 0 0 1-4.5-4.5V6A4.5 4.5 0 0 1 6 1.5Z"
+          fill={`url(#${gradient})`}
+        />
+      </svg>
+      <span className="absolute inset-x-0 top-[1.5px] flex h-[16.5px] items-center justify-center gap-[3px]">
+        <Person />
+        <span data-testid="requestCount" className="text-[11px] leading-none font-bold tabular-nums">
+          {count > 9 ? "9+" : count}
+        </span>
+      </span>
+    </span>
+  );
+};
 
 /**
  * Pending friend requests, in the header rather than taking permanent space in the sidebar.
@@ -55,25 +106,11 @@ export const RequestsMenu = ({
         id="requestsButton"
         type="button"
         title="Requests"
-        aria-label="Requests"
+        aria-label={requests.length ? `Requests (${requests.length})` : "Requests"}
         onClick={() => setOpen((current) => !current)}
-        className="btn-ghost relative grid h-9 w-9 place-items-center rounded-full p-0"
+        className="btn-ghost grid h-9 min-w-9 place-items-center rounded-full px-1.5 py-0"
       >
-        {/* A bell, not a chat bubble -- a request waiting to be answered is a notification,
-            not a conversation, and the old icon read as a second inbox. */}
-        <svg viewBox="0 0 24 24" className="h-[18px] w-[18px]" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M6 9a6 6 0 0 1 12 0c0 4 1.5 5.5 2 6H4c.5-.5 2-2 2-6Z" />
-          <path d="M10 19a2 2 0 0 0 4 0" />
-        </svg>
-        {requests.length > 0 && (
-          <span
-            data-testid="requestCount"
-            className="absolute -top-1 -right-1 grid h-4 min-w-4 place-items-center rounded-full px-1 text-[10px] font-bold text-white"
-            style={{ background: "linear-gradient(135deg, var(--color-brand), var(--color-brand-2))" }}
-          >
-            {requests.length}
-          </span>
-        )}
+        <RequestsIcon count={requests.length} />
       </button>
 
       {open &&

@@ -13,6 +13,9 @@ const PATIENCE = [
 /** Roughly what the old CSS animation moved at, now driven a frame at a time. */
 const PIXELS_PER_SECOND = 42;
 
+/** How long the strip stays where a finger, wheel or trackpad left it before streaming again. */
+const RESUME_AFTER_MS = 2500;
+
 /**
  * One tile, one look, everywhere it appears -- chosen, streaming past, or freshly typed.
  *
@@ -52,6 +55,12 @@ const Tile = ({
  * once it has scrolled a full copy -- which is invisible because the second copy is identical to
  * the first. Because it is real scroll, it can also be dragged, which auto-scroll alone cannot
  * offer -- something that has already streamed past is not gone, it is one drag away.
+ *
+ * <p>The same strip on a phone, swiped with one finger. What made it unreliable there before was
+ * the loop writing `scrollLeft` every frame while the finger (or its momentum) was also moving
+ * it, and iOS rounding each tiny per-frame step back to the same whole pixel. So the loop keeps
+ * its own fractional position, and never touches `scrollLeft` while a finger is down or while
+ * scroll it did not cause is still arriving -- it picks up from wherever that left it.
  */
 const Ticker = ({ items, onToggle }: { items: Interest[]; onToggle: (id: number) => void }) => {
   const track = useRef<HTMLDivElement>(null);
@@ -59,6 +68,9 @@ const Ticker = ({ items, onToggle }: { items: Interest[]; onToggle: (id: number)
   const dragMoved = useRef(false);
   const dragStartX = useRef(0);
   const dragStartScroll = useRef(0);
+  const touching = useRef(false);
+  const heldUntil = useRef(0);
+  const lastWritten = useRef(0);
 
   useEffect(() => {
     const node = track.current;
@@ -67,22 +79,50 @@ const Ticker = ({ items, onToggle }: { items: Interest[]; onToggle: (id: number)
 
     let frame = 0;
     let last: number | null = null;
+    let position = node.scrollLeft;
     const tick = (now: number) => {
       frame = requestAnimationFrame(tick);
-      const elapsed = last === null ? 0 : now - last;
+      // Capped, so coming back to a backgrounded tab does not leap a whole screen at once.
+      const elapsed = last === null ? 0 : Math.min(now - last, 100);
       last = now;
-      // The pause flag, and dragging, both leave scrollLeft exactly where they found it.
-      if (dragging.current || node.style.animationPlayState === "paused") return;
+      // The pause flag, dragging and a finger all leave scrollLeft exactly where they found it.
+      if (
+        dragging.current ||
+        touching.current ||
+        now < heldUntil.current ||
+        node.style.animationPlayState === "paused"
+      ) {
+        position = node.scrollLeft;
+        return;
+      }
       const half = node.scrollWidth / 2;
       if (half <= node.clientWidth) return;
-      node.scrollLeft += (elapsed / 1000) * PIXELS_PER_SECOND;
-      if (node.scrollLeft >= half) node.scrollLeft -= half;
+      position += (elapsed / 1000) * PIXELS_PER_SECOND;
+      if (position >= half) position -= half;
+      node.scrollLeft = position;
+      lastWritten.current = node.scrollLeft;
     };
     frame = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(frame);
     // Re-measures against the current content every time the list of what still streams changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [items.length]);
+
+  // Anything that moved the strip other than the loop itself -- touch momentum, a wheel, a
+  // trackpad -- holds the loop off until it has been still for a moment.
+  const onScroll = () => {
+    const node = track.current;
+    if (node && Math.abs(node.scrollLeft - lastWritten.current) > 2) {
+      heldUntil.current = performance.now() + RESUME_AFTER_MS;
+    }
+  };
+  const onTouchStart = () => {
+    touching.current = true;
+  };
+  const onTouchEnd = () => {
+    touching.current = false;
+    heldUntil.current = performance.now() + RESUME_AFTER_MS;
+  };
 
   // Only a mouse drags by grabbing -- touch and a trackpad already get this natively from
   // overflow-x: auto. No pointer capture: the swipe-to-reply gesture on a message bubble
@@ -115,12 +155,24 @@ const Ticker = ({ items, onToggle }: { items: Interest[]; onToggle: (id: number)
       id="interestTicker"
       ref={track}
       className="marquee-fade marquee-track flex items-center gap-2 overflow-x-auto overflow-y-hidden py-0.5 select-none"
-      style={{ cursor: "grab" }}
-      onMouseEnter={() => {
-        if (track.current) track.current.style.animationPlayState = "paused";
+      style={{ cursor: "grab", overscrollBehaviorX: "contain" }}
+      onScroll={onScroll}
+      onTouchStart={onTouchStart}
+      onTouchEnd={onTouchEnd}
+      onTouchCancel={onTouchEnd}
+      // Hover-to-pause is for a mouse only: a tap fires an emulated mouseenter with no
+      // matching leave, which would freeze the strip on a phone after the first pick.
+      onPointerEnter={(event) => {
+        if (event.pointerType === "mouse" && track.current) track.current.style.animationPlayState = "paused";
       }}
-      onMouseLeave={() => {
-        if (track.current) track.current.style.animationPlayState = "";
+      onPointerOut={(event) => {
+        if (
+          event.pointerType === "mouse" &&
+          track.current &&
+          !track.current.contains(event.relatedTarget as Node | null)
+        ) {
+          track.current.style.animationPlayState = "";
+        }
       }}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
@@ -147,24 +199,6 @@ const Ticker = ({ items, onToggle }: { items: Interest[]; onToggle: (id: number)
 /** Lowercase, one run of letters and digits, nothing else -- the same shape a curated tile has. */
 const normaliseTag = (label: string) => label.toLowerCase().replace(/[^a-z0-9]+/g, "");
 
-/**
- * Below the Tailwind `sm` breakpoint, in sync with actual layout rather than guessed from
- * `window.innerWidth` once. Drives which single tree of "rest" tiles mounts below -- rendering
- * both and hiding one with CSS would leave two nodes sharing `data-interest-id`, which is a
- * strict-mode locator collision in the desktop test suite regardless of which one is visible.
- */
-const useIsPhone = () => {
-  const [phone, setPhone] = useState(false);
-  useEffect(() => {
-    const query = window.matchMedia("(max-width: 639.98px)");
-    setPhone(query.matches);
-    const onChange = (event: MediaQueryListEvent) => setPhone(event.matches);
-    query.addEventListener("change", onChange);
-    return () => query.removeEventListener("change", onChange);
-  }, []);
-  return phone;
-};
-
 export const SetupPanel = ({
   interests,
   selected,
@@ -175,7 +209,9 @@ export const SetupPanel = ({
   patience,
   setPatience,
   findStatus,
+  searching,
   onFind,
+  onCancelFind,
   bare = false,
   onBack,
 }: {
@@ -188,15 +224,17 @@ export const SetupPanel = ({
   onRemoveInterest: (id: number) => void;
   patience: number;
   setPatience: (next: number) => void;
+  /** Only ever a short hint, and only once a search has been running a while. */
   findStatus: string;
+  searching: boolean;
   onFind: () => void;
+  onCancelFind: () => void;
   /** Dropped into an existing surface rather than centred on its own screen. */
   bare?: boolean;
   /** Phone only, and only when not bare: returns to the sidebar list. */
   onBack?: () => void;
 }) => {
   const [draft, setDraft] = useState("");
-  const phone = useIsPhone();
 
   // Suggestions first, then everything else -- the useful ones are what a returning visitor
   // sees at the front of the strip.
@@ -259,18 +297,7 @@ export const SetupPanel = ({
             />
           </div>
 
-          {rest.length > 0 &&
-            (phone ? (
-              // Everything just wraps -- nothing depends on the scroll animation (unreliable
-              // against touch momentum scrolling) or runs past the screen edge.
-              <div className="flex flex-wrap items-center gap-2">
-                {rest.map((interest) => (
-                  <Tile key={interest.id} interest={interest} on={false} onClick={() => toggle(interest.id)} />
-                ))}
-              </div>
-            ) : (
-              <Ticker items={rest} onToggle={toggle} />
-            ))}
+          {rest.length > 0 && <Ticker items={rest} onToggle={toggle} />}
         </div>
       </div>
 
@@ -291,19 +318,37 @@ export const SetupPanel = ({
         </div>
       </div>
 
-      <div className="mt-6 flex flex-wrap items-center gap-3">
+      <div className="mt-6">
+        {/* The button is the status: it becomes the search while one runs, and tapping it
+            again stops it. Nothing appears beside it to push the layout around. */}
         <button
           id="findSomeone"
           type="button"
-          className="btn-primary"
-          disabled={selected.length === 0}
-          onClick={onFind}
+          className={searching ? "find-searching" : "btn-primary min-w-[190px]"}
+          disabled={!searching && selected.length === 0}
+          aria-busy={searching}
+          title={searching ? "Tap to stop looking" : undefined}
+          onClick={searching ? onCancelFind : onFind}
         >
-          Find someone
+          {searching ? (
+            <span className="relative flex items-center justify-center gap-2.5">
+              <span className="find-radar" aria-hidden />
+              <span className="find-label">{findStatus ? "Still looking" : "Looking"}</span>
+              <span className="find-dots" aria-hidden>
+                <i />
+                <i />
+                <i />
+              </span>
+            </span>
+          ) : (
+            "Find someone"
+          )}
         </button>
-        <span id="findStatus" className="text-[13px]" style={{ color: "var(--color-muted)" }}>
-          {findStatus}
-        </span>
+        {findStatus && (
+          <p id="findStatus" className="rise mt-2 mb-0 text-[11px]" style={{ color: "var(--color-faint)" }}>
+            {findStatus}
+          </p>
+        )}
       </div>
     </>
   );
@@ -311,7 +356,9 @@ export const SetupPanel = ({
   return bare ? (
     body
   ) : (
-    <div className="grid min-h-0 flex-1 place-items-start overflow-y-auto p-3.5 sm:place-items-center sm:p-6">
+    // grid-cols-1 is minmax(0, 1fr): an auto column would grow to the strip's whole scroll width,
+    // and the panel would run off a phone screen with it.
+    <div className="grid min-h-0 flex-1 grid-cols-1 place-items-start overflow-y-auto p-3.5 sm:place-items-center sm:p-6">
       <div className="panel w-full max-w-[620px] p-4 sm:p-7">
         {onBack && (
           <button

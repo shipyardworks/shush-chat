@@ -70,7 +70,7 @@ export const api = {
 
   unblock: (userId: string) => request(`/api/blocks/${userId}`, { method: "DELETE" }),
 
-  /** Every conversation this person has had, newest first, strangers included. */
+  /** Every conversation this person has had, newest first, friends or not. */
   conversations: () => json<Conversation[]>("/api/conversations"),
 
   react: (messageId: string, emoji: string | null) =>

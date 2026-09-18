@@ -111,6 +111,109 @@ html[data-theme="light"] body {
 
 :focus-visible { outline: 2px solid var(--color-brand); outline-offset: 2px; }
 
+/*
+  "Find someone" while a search runs. The button itself becomes the status: a light sweeping
+  round its edge, a radar ping, and the word. Same footprint as the idle button, so the swap
+  moves nothing around it.
+*/
+.find-searching {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  min-width: 190px;
+  cursor: pointer;
+  border-radius: 999px;
+  border: 0;
+  padding: 0.5rem 1.25rem;
+  font-weight: 600;
+  color: var(--color-body);
+  background: transparent;
+  box-shadow: 0 0 24px rgb(124 92 255 / 0.28);
+}
+.find-searching::before {
+  content: "";
+  position: absolute;
+  inset: -200% -40%;
+  z-index: -2;
+  background: conic-gradient(
+    from 0deg,
+    transparent 0 55%,
+    var(--color-brand) 75%,
+    var(--color-cyan) 90%,
+    transparent 100%
+  );
+  animation: find-sweep 1.8s linear infinite;
+}
+.find-searching::after {
+  content: "";
+  position: absolute;
+  inset: 1.5px;
+  z-index: -1;
+  border-radius: inherit;
+  background:
+    linear-gradient(135deg, rgb(124 92 255 / 0.18), rgb(56 208 224 / 0.08)),
+    var(--color-surface);
+}
+.find-searching:active { transform: translateY(1px); }
+
+.find-radar {
+  position: relative;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--color-cyan);
+  box-shadow: 0 0 8px var(--color-cyan);
+}
+.find-radar::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  border: 1.5px solid var(--color-cyan);
+  animation: find-ping 1.4s ease-out infinite;
+}
+
+.find-label {
+  background: linear-gradient(90deg, var(--color-body) 30%, var(--color-cyan) 50%, var(--color-body) 70%);
+  background-size: 250% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: find-shimmer 2.2s linear infinite;
+}
+
+.find-dots { display: inline-flex; gap: 3px; }
+.find-dots i {
+  width: 3.5px;
+  height: 3.5px;
+  border-radius: 999px;
+  background: currentColor;
+  opacity: 0.25;
+  animation: find-dot 1.2s ease-in-out infinite;
+}
+.find-dots i:nth-child(2) { animation-delay: 0.15s; }
+.find-dots i:nth-child(3) { animation-delay: 0.3s; }
+
+@keyframes find-sweep { to { transform: rotate(1turn); } }
+@keyframes find-ping { from { transform: scale(1); opacity: 0.9; } to { transform: scale(3); opacity: 0; } }
+@keyframes find-shimmer { from { background-position: 100% 0; } to { background-position: -150% 0; } }
+@keyframes find-dot { 0%, 100% { opacity: 0.25; transform: none; } 40% { opacity: 1; transform: translateY(-2px); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .find-searching::before,
+  .find-radar::after,
+  .find-label,
+  .find-dots i { animation: none; }
+  .find-dots i { opacity: 0.7; }
+}
+
+/* A one-line reminder under the header while the account only lives in this browser. */
+.save-strip {
+  background:
+    linear-gradient(90deg, rgb(124 92 255 / 0.16), rgb(56 208 224 / 0.07) 60%, transparent),
+    var(--color-surface);
+}
+
 @keyframes rise { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
 .rise { animation: rise 0.16s ease-out; }
 

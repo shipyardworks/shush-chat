@@ -9,6 +9,7 @@ import { ChatPanel } from "@/components/ChatPanel";
 import { ImageViewer } from "@/components/ImageViewer";
 import { ProfileDialog, type ProfileTarget } from "@/components/ProfileDialog";
 import { RequestsMenu } from "@/components/RequestsMenu";
+import { SaveAccount } from "@/components/SaveAccount";
 import { SetupPanel } from "@/components/SetupPanel";
 import { Sidebar } from "@/components/Sidebar";
 import { ThemeToggle } from "@/components/ThemeToggle";
@@ -62,7 +63,9 @@ export default function Chat() {
       patience={shush.patience}
       setPatience={shush.setPatience}
       findStatus={shush.findStatus}
+      searching={shush.searching}
       onFind={shush.findSomeone}
+      onCancelFind={shush.cancelFind}
       bare={bare}
       onBack={bare ? undefined : () => setMobileView("list")}
     />
@@ -88,7 +91,7 @@ export default function Chat() {
         }}
       >
         {/* The logo goes back to the start screen. It only changes what is on screen: walking
-            out of a stranger conversation by navigating away would be a silent disappearance
+            out of a live conversation by navigating away would be a silent disappearance
             for the other person, and Leave is still the button that ends it. */}
         <button
           id="home"
@@ -140,6 +143,13 @@ export default function Chat() {
         <ThemeToggle />
       </header>
 
+      {shush.session?.user.anonymous && (
+        <SaveAccount
+          onSave={shush.saveAccount}
+          className={chatOpenOnPhone ? "hidden sm:flex" : "flex"}
+        />
+      )}
+
       <main
         className={`relative grid min-h-0 flex-1 ${
           signedIn ? "grid-cols-1 sm:grid-cols-[240px_1fr] lg:grid-cols-[272px_1fr]" : "grid-cols-1"
@@ -166,7 +176,6 @@ export default function Chat() {
               setMobileView("detail");
               shush.goHome();
             }}
-            onSaveAccount={shush.saveAccount}
             onLogout={shush.logout}
           />
         )}
@@ -201,11 +210,7 @@ export default function Chat() {
                 setProfile({
                   userId: shush.peer.userId,
                   name: shush.currentFriend?.displayName ?? shush.peer.name ?? "Someone",
-                  sub: shush.currentFriend
-                    ? shush.currentFriend.online
-                      ? "Online"
-                      : "Offline"
-                    : "A stranger you talked to",
+                  sub: shush.currentFriend ? (shush.currentFriend.online ? "Online" : "Offline") : "",
                   mine: false,
                   friend: Boolean(shush.currentFriend),
                 })

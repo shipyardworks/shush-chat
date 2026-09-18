@@ -42,10 +42,11 @@ export type Message = {
   reactions?: Reaction[];
 };
 
-/** One row of the history list: every conversation, friends and strangers alike. */
+/** One row of the history list: every conversation, friend or not. */
 export type Conversation = {
   id: string;
-  kind: "stranger" | "friend";
+  /** "friend" once a friendship is made; the only value the client ever checks for. */
+  kind: string;
   state: string;
   unreadCount: number;
   peerId: string;

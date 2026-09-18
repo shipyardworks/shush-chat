@@ -114,6 +114,8 @@ export const useShush = () => {
   const [customInterests, setCustomInterests] = useState<Interest[]>([]);
   const [patience, setPatience] = useState(5);
   const [findStatus, setFindStatus] = useState("");
+  // A search the server is still running for us -- the find button renders from this.
+  const [searching, setSearching] = useState(false);
   const [typing, setTyping] = useState(false);
   const [items, setItems] = useState<ChatItem[]>([]);
   const [conversationId, setConversationId] = useState<string | null>(null);
@@ -267,6 +269,7 @@ export const useShush = () => {
       setView("chat");
       viewRef.current = "chat";
       setFindStatus("");
+      setSearching(false);
       setTyping(false);
       if (hintTimer.current) clearTimeout(hintTimer.current);
     },
@@ -296,7 +299,6 @@ export const useShush = () => {
             userId: String(frame.withUserId),
             name: (frame.withDisplayName as string | null) ?? null,
             // Their name heads the conversation; why you were put together is the subtitle.
-            // "A stranger" is not a name, it is the app declining to say who this is.
             heading: (frame.withDisplayName as string | null) ?? "Someone",
             sub: frame.randomMatch
               ? "A random match — nobody sharing your interests was around"
@@ -539,6 +541,8 @@ export const useShush = () => {
         frameHandler.current(JSON.parse(event.data as string)),
       );
       ws.addEventListener("open", () => resolve());
+      // The server drops a closed socket from the wait pool, so the search is over too.
+      ws.addEventListener("close", () => setSearching(false));
       socket.current = ws;
     });
 
@@ -570,7 +574,7 @@ export const useShush = () => {
           userId: thread.peerId,
           name: thread.peerName,
           heading: thread.peerName ?? "Someone",
-          sub: thread.isFriend ? (thread.online ? "Online" : "Offline") : "A stranger you talked to",
+          sub: thread.isFriend ? (thread.online ? "Online" : "Offline") : "",
         },
         thread.isFriend,
         Boolean(thread.ended),
@@ -640,7 +644,8 @@ export const useShush = () => {
   /* ---------- sending ---------- */
 
   const findSomeone = useCallback(async () => {
-    setFindStatus("Looking…");
+    setFindStatus("");
+    setSearching(true);
     // A local-only tag has no row on the server to save against or match on -- sending its
     // negative id to either call would just be a request the server has no way to satisfy.
     const realIds = selected.filter((id) => id > 0);
@@ -652,11 +657,18 @@ export const useShush = () => {
     hintTimer.current = setTimeout(() => {
       setFindStatus(
         friendsRef.current.length
-          ? "Still looking. People you are already friends with are skipped — you can message them from the list, or remove one from their profile."
-          : "Still looking. Nobody sharing your interests is here right now.",
+          ? "Nobody new is around yet. Friends are skipped here, message them from your list."
+          : "Nobody with your interests is around yet.",
       );
     }, 12_000);
   }, [patience, selected, send]);
+
+  const cancelFind = useCallback(() => {
+    send({ type: "cancelFind" });
+    setSearching(false);
+    setFindStatus("");
+    if (hintTimer.current) clearTimeout(hintTimer.current);
+  }, [send]);
 
   const sendMessage = useCallback(
     (body: string) => {
@@ -839,7 +851,7 @@ export const useShush = () => {
       // the whole thing is reversible from where you are standing.
       if (peer.userId === userId) {
         setIsFriendConversation(false);
-        setPeer((current) => ({ ...current, sub: "A stranger you talked to" }));
+        setPeer((current) => ({ ...current, sub: "" }));
       }
     },
     [peer.userId, refreshLists],
@@ -960,7 +972,7 @@ export const useShush = () => {
   // conversation in two places. Decided by who is currently a friend rather than by the
   // conversation's kind: kind is set when a friendship is made and never unset, so filtering on
   // it made an unfriended person vanish from both lists instead of moving between them.
-  const strangerConversations = useMemo(() => {
+  const nonFriendConversations = useMemo(() => {
     const friendIds = new Set(friends.map((friend) => friend.userId));
     return conversations.filter((conversation) => !friendIds.has(conversation.peerId));
   }, [conversations, friends]);
@@ -985,7 +997,7 @@ export const useShush = () => {
     view,
     friends,
     requests,
-    conversations: strangerConversations,
+    conversations: nonFriendConversations,
     listsLoading,
     interests,
     selected,
@@ -996,6 +1008,8 @@ export const useShush = () => {
     patience,
     setPatience,
     findStatus,
+    searching,
+    cancelFind,
     typing,
     items,
     conversationId,

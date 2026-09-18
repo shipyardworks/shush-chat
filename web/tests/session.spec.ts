@@ -106,7 +106,7 @@ test("an ended conversation offers the way to the next one, as a modal over it",
   await expect(bob.locator("#endedPanel")).toBeVisible();
 });
 
-test("the conversation is headed with their name, not 'A stranger'", async ({ browser }) => {
+test("the conversation is headed with their name, not 'Someone'", async ({ browser }) => {
   const alice = await arrive(browser);
   const bob = await arrive(browser);
   // The name alone: the header button also carries an avatar initial.

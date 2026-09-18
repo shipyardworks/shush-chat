@@ -66,7 +66,7 @@ test("the landing page is server-rendered", async ({ request }) => {
   expect(html).toContain("Start chatting");
 });
 
-test("two strangers match on a shared interest, talk, and keep each other", async ({ browser }) => {
+test("two people match on a shared interest, talk, and keep each other", async ({ browser }) => {
   const alice = await arrive(browser);
   const bob = await arrive(browser);
 

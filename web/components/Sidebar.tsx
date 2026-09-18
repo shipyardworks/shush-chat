@@ -18,7 +18,6 @@ export const Sidebar = ({
   onOpenFriend,
   onOpenConversation,
   onFindSomeone,
-  onSaveAccount,
   onLogout,
 }: {
   session: Session;
@@ -33,17 +32,9 @@ export const Sidebar = ({
   onOpenFriend: (friend: Friend) => void;
   onOpenConversation: (conversation: Conversation) => void;
   onFindSomeone: () => void;
-  onSaveAccount: (email: string, password: string) => Promise<{ ok: boolean; message: string }>;
   onLogout: () => void;
 }) => {
   const [tab, setTab] = useState<Tab>("chats");
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [saveStatus, setSaveStatus] = useState("");
-
-  const save = async () => {
-    setSaveStatus((await onSaveAccount(email, password)).message);
-  };
 
   return (
     <aside
@@ -110,7 +101,7 @@ export const Sidebar = ({
       </div>
 
       {/* Only this scrolls. The tabs above and the account box below stay put -- a list that
-          is any length should never be able to push "Save your account" off the bottom. */}
+          is any length should never be able to push it off the bottom. */}
       <div className="scroll-elegant min-h-0 flex-1 overflow-y-auto px-4">
         {loading ? (
           <Skeleton />
@@ -154,7 +145,7 @@ export const Sidebar = ({
             })}
             {conversations.length === 0 && (
               <p id="noChats" className="mt-2 text-[13px]" style={{ color: "var(--color-faint)" }}>
-                Nothing yet. Every conversation shows up here, friend or stranger.
+                Nothing yet. Every conversation you have shows up here.
               </p>
             )}
           </ul>
@@ -205,49 +196,7 @@ export const Sidebar = ({
         )}
       </div>
 
-      {session.user.anonymous ? (
-        <div
-          id="saveBox"
-          className="flex-none border-t p-2.5 sm:p-4"
-          style={{ borderColor: "var(--color-line-soft)" }}
-        >
-          <h2 className="section-label">Save your account</h2>
-          {/* Full explanation on tablet and up; a phone screen with an otherwise-empty list
-              does not need three lines of copy sitting under every chat that could fit here. */}
-          <p
-            className="mb-2 hidden text-[13px] sm:mb-2.5 sm:block"
-            style={{ color: "var(--color-faint)" }}
-          >
-            This exists only in this browser. Clear it, and it is gone — save it to keep it safe.
-          </p>
-          <div className="flex flex-col gap-1.5 sm:gap-2">
-            <input
-              id="email"
-              type="email"
-              className="field"
-              placeholder="you@example.com"
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
-            />
-            <input
-              id="password"
-              type="password"
-              className="field"
-              placeholder="Password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-            />
-            <button id="saveAccount" type="button" className="btn" onClick={save}>
-              Save
-            </button>
-            {saveStatus && (
-              <span className="text-[13px]" style={{ color: "var(--color-faint)" }}>
-                {saveStatus}
-              </span>
-            )}
-          </div>
-        </div>
-      ) : (
+      {!session.user.anonymous && (
         <div
           id="accountBox"
           className="flex-none border-t p-2.5 sm:p-4"

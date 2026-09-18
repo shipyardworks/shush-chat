@@ -123,7 +123,7 @@ export const ChatPanel = ({
             {peer.heading}
           </h2>
           {/* The same slot does double duty: "Typing…" while it's happening, otherwise whatever
-              this line would say anyway (online/offline/stranger/shared interests). One line of
+              this line would say anyway (online/offline/shared interests). One line of
               status, not two, and nothing about it needs a fixed spot lower in the panel. */}
           <div id="chatSub" className="truncate text-xs" style={{ color: "var(--color-faint)" }}>
             {typing ? "Typing…" : peer.sub}
@@ -134,7 +134,7 @@ export const ChatPanel = ({
         {!isFriendConversation && (
           <>
             {/* Still offered after somebody leaves: asking to keep them is the one thing a
-                finished stranger conversation is still for. Icon-only on phone -- two full-text
+                finished conversation is still for. Icon-only on phone -- two full-text
                 pills left no room for the peer's own name. */}
             <button
               id="addFriend"
@@ -321,13 +321,13 @@ export const ChatPanel = ({
         createPortal(
           <div
             id="findSomeoneModal"
-            className="fixed inset-0 z-50 grid place-items-center p-5 backdrop-blur-[3px]"
+            className="fixed inset-0 z-50 grid grid-cols-1 place-items-center overflow-y-auto p-3 backdrop-blur-[3px] sm:p-5"
             style={{ backgroundColor: "rgb(4 5 9 / 0.62)" }}
             onClick={(event) => {
               if (event.target === event.currentTarget) setPicking(false);
             }}
           >
-            <div role="dialog" aria-modal="true" className="panel rise w-full max-w-[620px] p-7">
+            <div role="dialog" aria-modal="true" className="panel rise w-full max-w-[620px] p-4 sm:p-7">
               <div className="mb-1 flex justify-end">
                 <button
                   type="button"
