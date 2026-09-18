@@ -3,7 +3,10 @@ package site.syamdev.shush.conversation;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import site.syamdev.shush.common.AfterCommit;
 import site.syamdev.shush.common.ApiException;
+import site.syamdev.shush.realtime.BackplanePublisher;
+import site.syamdev.shush.realtime.ServerFrame;
 
 import java.time.Clock;
 import java.time.Duration;
@@ -22,15 +25,18 @@ public class ConversationService {
 
     private final ConversationRepository conversations;
     private final ConversationParticipantRepository participants;
+    private final BackplanePublisher backplane;
     private final Clock clock;
     private final Duration purgeAfterEnding;
 
     ConversationService(ConversationRepository conversations,
                         ConversationParticipantRepository participants,
+                        BackplanePublisher backplane,
                         Clock clock,
                         @Value("${shush.conversation.purge-after-ending}") Duration purgeAfterEnding) {
         this.conversations = conversations;
         this.participants = participants;
+        this.backplane = backplane;
         this.clock = clock;
         this.purgeAfterEnding = purgeAfterEnding;
     }
@@ -59,6 +65,8 @@ public class ConversationService {
     @Transactional
     public Conversation createMatched(UUID firstUserId, UUID secondUserId,
                                       List<Short> sharedInterestIds) {
+        endOpenStrangerConversations(firstUserId);
+        endOpenStrangerConversations(secondUserId);
         Conversation conversation = create(Conversation.Kind.STRANGER, firstUserId, secondUserId);
         conversation.matchedOn(sharedInterestIds == null || sharedInterestIds.isEmpty()
                 ? null
@@ -66,6 +74,29 @@ public class ConversationService {
         // Until somebody asks to keep it, this conversation is on the clock.
         conversation.scheduleForPurge(clock.instant().plus(purgeAfterEnding));
         return conversation;
+    }
+
+    /**
+     * One stranger conversation at a time (pre-plan.md 3): walking into a new one walks out of
+     * whatever was still open, exactly as if Leave had been pressed. Without this every match
+     * left the previous one live, so the history list filled with threads that still took
+     * messages -- one screen could send into a conversation the other had long since moved on
+     * from. Friend conversations are kept, not active, and are never touched here.
+     */
+    private void endOpenStrangerConversations(UUID userId) {
+        Instant now = clock.instant();
+        for (UUID conversationId : conversations.findOpenStrangerConversationIds(userId)) {
+            Conversation open = require(conversationId);
+            // Two people rematched share their old thread; the first pass already ended it.
+            if (open.getState() != Conversation.State.ACTIVE) {
+                continue;
+            }
+            participants.markLeft(conversationId, userId, now);
+            open.end(now, now.plus(purgeAfterEnding));
+            List<UUID> everyone = participantIds(conversationId);
+            ServerFrame.Left left = new ServerFrame.Left(conversationId, userId);
+            AfterCommit.run(() -> backplane.publish(everyone, left));
+        }
     }
 
     /** Somebody wants this kept, so stop counting down to its deletion. */

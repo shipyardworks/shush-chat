@@ -158,6 +158,48 @@ class MatchingIT extends AbstractIT {
         }
     }
 
+    /**
+     * One stranger conversation at a time. Matching again walks out of the one still open, and
+     * the person left behind in it is told, the same way Leave would have told them.
+     */
+    @Test
+    void aNewMatchEndsTheConversationItReplaces() throws Exception {
+        TestUsers.Session alice = testUsers.newAnonymous();
+        TestUsers.Session bob = testUsers.newAnonymous();
+        TestUsers.Session carol = testUsers.newAnonymous();
+
+        try (WsClient aliceWs = WsClient.connect(port, alice.jwt());
+             WsClient bobWs = WsClient.connect(port, bob.jwt());
+             WsClient carolWs = WsClient.connect(port, carol.jwt())) {
+            aliceWs.await("hello");
+            bobWs.await("hello");
+            carolWs.await("hello");
+
+            find(aliceWs, List.of(GARDENING), 0);
+            find(bobWs, List.of(GARDENING), 0);
+            UUID first = UUID.fromString(aliceWs.await("matched").path("conversationId").asText());
+            bobWs.await("matched");
+
+            find(aliceWs, List.of(GARDENING), 0);
+            find(carolWs, List.of(GARDENING), 0);
+            UUID second = UUID.fromString(aliceWs.await("matched").path("conversationId").asText());
+            assertThat(second).isNotEqualTo(first);
+
+            JsonNode left = bobWs.await("left");
+            assertThat(left.path("conversationId").asText()).isEqualTo(first.toString());
+            assertThat(left.path("userId").asText()).isEqualTo(alice.userId().toString());
+
+            assertThat(conversations.findById(first).orElseThrow().getState())
+                    .isEqualTo(Conversation.State.ENDED);
+            assertThat(conversations.findById(second).orElseThrow().getState())
+                    .isEqualTo(Conversation.State.ACTIVE);
+
+            // Over means over: the thread bob was left in no longer takes messages.
+            bobWs.sendText(first, UUID.randomUUID(), "still there?");
+            assertThat(bobWs.await("error").path("code").asText()).isEqualTo("conversation_ended");
+        }
+    }
+
     @Test
     void closingTheSocketTakesYouOutOfThePool() throws Exception {
         TestUsers.Session alice = testUsers.newAnonymous();
