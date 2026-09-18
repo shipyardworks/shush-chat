@@ -90,7 +90,7 @@ export const CameraCapture = ({
     <div
       id="cameraCapture"
       className="fixed inset-0 z-[65] flex flex-col"
-      style={{ backgroundColor: "rgb(4 5 9 / 0.94)" }}
+      style={{ backgroundColor: "var(--color-scrim-strong)" }}
     >
       <div className="flex items-center gap-3 p-4">
         <button

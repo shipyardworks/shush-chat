@@ -3,6 +3,7 @@
 import { useState } from "react";
 import type { Conversation, Friend, Session } from "@/lib/types";
 import { Avatar } from "./Avatar";
+import { SaveAccount } from "./SaveAccount";
 import { Skeleton } from "./Skeleton";
 
 type Tab = "chats" | "friends";
@@ -19,6 +20,7 @@ export const Sidebar = ({
   onOpenConversation,
   onFindSomeone,
   onLogout,
+  onSaveAccount,
 }: {
   session: Session;
   friends: Friend[];
@@ -33,6 +35,7 @@ export const Sidebar = ({
   onOpenConversation: (conversation: Conversation) => void;
   onFindSomeone: () => void;
   onLogout: () => void;
+  onSaveAccount: (email: string, password: string) => Promise<{ ok: boolean; message: string }>;
 }) => {
   const [tab, setTab] = useState<Tab>("chats");
 
@@ -63,8 +66,8 @@ export const Sidebar = ({
             style={
               tab === "chats"
                 ? {
-                    background: "linear-gradient(135deg, var(--color-brand), var(--color-brand-2))",
-                    color: "#fff",
+                    background: "var(--gradient-brand)",
+                    color: "var(--color-on-brand)",
                   }
                 : { color: "var(--color-muted)" }
             }
@@ -80,8 +83,8 @@ export const Sidebar = ({
             style={
               tab === "friends"
                 ? {
-                    background: "linear-gradient(135deg, var(--color-brand), var(--color-brand-2))",
-                    color: "#fff",
+                    background: "var(--gradient-brand)",
+                    color: "var(--color-on-brand)",
                   }
                 : { color: "var(--color-muted)" }
             }
@@ -96,7 +99,7 @@ export const Sidebar = ({
           className="btn-primary mt-3 w-full"
           onClick={onFindSomeone}
         >
-          Find someone new
+          Find someone
         </button>
       </div>
 
@@ -133,8 +136,7 @@ export const Sidebar = ({
                     {conversation.unreadCount > 0 && !onScreenNow && (
                       <span
                         data-testid="chatUnread"
-                        className="grid h-5 min-w-5 flex-none place-items-center rounded-full px-1.5 text-[11px] font-bold text-white"
-                        style={{ background: "linear-gradient(135deg, var(--color-brand), var(--color-brand-2))" }}
+                        className="badge"
                       >
                         {conversation.unreadCount > 99 ? "99+" : conversation.unreadCount}
                       </span>
@@ -177,8 +179,7 @@ export const Sidebar = ({
                     {friend.unreadCount > 0 && !onScreenNow && (
                       <span
                         data-testid="unread"
-                        className="grid h-5 min-w-5 flex-none place-items-center rounded-full px-1.5 text-[11px] font-bold text-white"
-                        style={{ background: "linear-gradient(135deg, var(--color-brand), var(--color-brand-2))" }}
+                        className="badge"
                       >
                         {friend.unreadCount > 99 ? "99+" : friend.unreadCount}
                       </span>
@@ -195,6 +196,8 @@ export const Sidebar = ({
           </ul>
         )}
       </div>
+
+      {session.user.anonymous && <SaveAccount onSave={onSaveAccount} />}
 
       {!session.user.anonymous && (
         <div

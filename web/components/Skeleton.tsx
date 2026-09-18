@@ -31,3 +31,35 @@ export const Skeleton = ({ rows = 4 }: { rows?: number }) => (
     ))}
   </div>
 );
+
+/** Bubble-shaped bars, theirs on the left and yours on the right, in a rough conversation rhythm. */
+const BUBBLES: { mine: boolean; width: string }[] = [
+  { mine: false, width: "38%" },
+  { mine: false, width: "24%" },
+  { mine: true, width: "32%" },
+  { mine: false, width: "46%" },
+  { mine: true, width: "20%" },
+  { mine: true, width: "40%" },
+];
+
+/**
+ * Stands in for a conversation while its history loads. An empty pane in that moment reads as
+ * "nothing was ever said here", which is a claim, and usually a wrong one.
+ */
+export const MessageSkeleton = () => (
+  <div id="messagesLoading" aria-hidden="true" className="flex flex-col gap-2 pt-2">
+    {BUBBLES.map((bubble, index) => (
+      <span
+        key={index}
+        className="block h-11 animate-pulse"
+        style={{
+          width: bubble.width,
+          minWidth: 90,
+          alignSelf: bubble.mine ? "flex-end" : "flex-start",
+          borderRadius: bubble.mine ? "16px 16px 5px 16px" : "16px 16px 16px 5px",
+          backgroundColor: "var(--color-surface-3)",
+        }}
+      />
+    ))}
+  </div>
+);

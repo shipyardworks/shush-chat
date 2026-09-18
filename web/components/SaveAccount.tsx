@@ -4,16 +4,14 @@ import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 
 /**
- * One line under the header for as long as the account lives only in this browser. The form
- * itself opens on demand, instead of an email and a password box sitting in the sidebar the
- * whole time, taking room from the chat list on a phone.
+ * Pinned to the bottom of the sidebar for as long as the account lives only in this browser --
+ * where "Signed in" sits once it is saved, so the two states occupy the same place. The form
+ * itself opens on demand, instead of an email and a password box sitting there the whole time.
  */
 export const SaveAccount = ({
   onSave,
-  className = "",
 }: {
   onSave: (email: string, password: string) => Promise<{ ok: boolean; message: string }>;
-  className?: string;
 }) => {
   const [open, setOpen] = useState(false);
   const [email, setEmail] = useState("");
@@ -41,27 +39,25 @@ export const SaveAccount = ({
     <>
       <div
         id="saveStrip"
-        className={`save-strip items-center gap-3 border-b px-4 py-2 sm:px-5 ${className}`}
+        className="flex-none border-t p-3 sm:p-4"
         style={{ borderColor: "var(--color-line-soft)" }}
       >
-        <svg viewBox="0 0 24 24" className="h-4 w-4 flex-none" fill="none" stroke="var(--color-cyan)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-          <path d="M12 3 5 6v5c0 4.4 3 8.3 7 9.5 4-1.2 7-5.1 7-9.5V6l-7-3Z" />
-          <path d="M12 8.5v4M12 15.5h.01" />
-        </svg>
-        <p id="saveWarning" className="m-0 min-w-0 flex-1 text-xs leading-snug" style={{ color: "var(--color-muted)" }}>
-          <span className="sm:hidden">Your chats will be lost unless you save.</span>
-          <span className="hidden sm:inline">
+        <div className="flex items-start gap-2.5">
+          <svg viewBox="0 0 24 24" className="mt-px h-4 w-4 flex-none" fill="none" stroke="var(--color-brand)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <path d="M12 3 5 6v5c0 4.4 3 8.3 7 9.5 4-1.2 7-5.1 7-9.5V6l-7-3Z" />
+            <path d="M12 8.5v4M12 15.5h.01" />
+          </svg>
+          <p id="saveWarning" className="m-0 min-w-0 flex-1 text-xs leading-snug" style={{ color: "var(--color-muted)" }}>
             Your chats and friends will be lost if you don&apos;t save your account.
-          </span>
-        </p>
+          </p>
+        </div>
         <button
           id="openSave"
           type="button"
-          className="btn-primary flex-none px-3 py-1 text-xs"
+          className="btn-primary mt-3 w-full py-1.5 text-sm"
           onClick={() => setOpen(true)}
         >
-          <span className="sm:hidden">Save</span>
-          <span className="hidden sm:inline">Save account</span>
+          Save account
         </button>
       </div>
 
@@ -69,7 +65,7 @@ export const SaveAccount = ({
         createPortal(
           <div
             className="fixed inset-0 z-50 grid place-items-center p-5 backdrop-blur-[3px]"
-            style={{ backgroundColor: "rgb(4 5 9 / 0.62)" }}
+            style={{ backgroundColor: "var(--color-scrim)" }}
             onClick={(event) => {
               if (event.target === event.currentTarget) setOpen(false);
             }}

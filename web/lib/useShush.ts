@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, setBearer } from "./api";
 import { socketUrl } from "./config";
 import { newId } from "./ids";
+import { findByTag, normaliseTag } from "./interests";
 import { dayKey, dayLabel } from "./time";
 import type {
   ChatItem,
@@ -130,6 +131,9 @@ export const useShush = () => {
   // True only until the first load resolves -- an empty array alone can't tell "still fetching"
   // from "genuinely empty."
   const [listsLoading, setListsLoading] = useState(true);
+  // A thread picked from the list, while its history is still on the way -- the message pane
+  // draws placeholders instead of looking like a conversation where nothing was ever said.
+  const [historyLoading, setHistoryLoading] = useState(false);
   const [attachment, setAttachment] = useState<Attachment | null>(null);
 
   const socket = useRef<WebSocket | null>(null);
@@ -145,6 +149,12 @@ export const useShush = () => {
   // Client ids drawn optimistically and not yet confirmed. A ref, not state, because the
   // decision "patch or append" is made while handling a frame and cannot wait for a render.
   const optimistic = useRef(new Set<string>());
+  // Bumped every time a conversation is put on screen. A history load that finishes after
+  // another thread (or the same one, again) was opened compares against it and drops its rows.
+  const openedAt = useRef(0);
+  // Bumped by every find and every cancel. A find still waiting on its interests to save checks
+  // it before sending, so a cancel pressed in that gap cannot be overtaken by the find it undid.
+  const findAttempt = useRef(0);
 
   useEffect(() => {
     conversationRef.current = conversationId;
@@ -252,6 +262,7 @@ export const useShush = () => {
 
   const openConversation = useCallback(
     (id: string, next: Peer, friendConversation: boolean, endedAlready = false) => {
+      openedAt.current += 1;
       seen.current = new Set();
       optimistic.current = new Set();
       lastDay.current = null;
@@ -266,6 +277,7 @@ export const useShush = () => {
       // The server already told us whether this one is over -- reopening one from history used
       // to always start as if it were live, letting a send race the rejection.
       setEnded(endedAlready);
+      setHistoryLoading(false);
       setView("chat");
       viewRef.current = "chat";
       setFindStatus("");
@@ -522,18 +534,34 @@ export const useShush = () => {
     // filling a form out again.
     const known = new Set([...catalogue.suggested, ...catalogue.all].map((interest) => interest.id));
     const savedSelection = rememberedSelected()?.filter((id) => known.has(id)) ?? [];
+    // A local tag that names a real tile ("history" typed before that check existed) becomes the
+    // tile itself, and a tag saved twice is kept once -- otherwise both copies render side by side.
+    const catalogueList = [...catalogue.suggested, ...catalogue.all];
+    const promoted: number[] = [];
+    const savedCustom: Interest[] = [];
+    for (const custom of rememberedCustomInterests()) {
+      const tag = normaliseTag(custom.label);
+      const real = findByTag(catalogueList, tag);
+      if (real) promoted.push(real.id);
+      else if (tag && !findByTag(savedCustom, tag)) savedCustom.push(custom);
+    }
+    rememberCustomInterests(savedCustom);
+    setCustomInterests(savedCustom);
     // A local-only tag is always selected -- there is no unselected-but-remembered state for
     // one, since it has nowhere else to live once it is off.
-    const savedCustom = rememberedCustomInterests();
-    setCustomInterests(savedCustom);
-    setSelected([
-      ...(savedSelection.length > 0
-        ? savedSelection
-        : catalogue.fromHistory
-          ? catalogue.suggested.map((i) => i.id)
-          : []),
-      ...savedCustom.map((interest) => interest.id),
-    ]);
+    const initial = [
+      ...new Set([
+        ...(savedSelection.length > 0
+          ? savedSelection
+          : catalogue.fromHistory
+            ? catalogue.suggested.map((i) => i.id)
+            : []),
+        ...promoted,
+        ...savedCustom.map((interest) => interest.id),
+      ]),
+    ];
+    setSelected(initial);
+    rememberSelected(initial);
 
     await new Promise<void>((resolve) => {
       const ws = new WebSocket(socketUrl(next.jwt));
@@ -579,10 +607,13 @@ export const useShush = () => {
         thread.isFriend,
         Boolean(thread.ended),
       );
+      setHistoryLoading(true);
+      const opening = openedAt.current;
 
       // How far they have read, before any history is drawn -- otherwise the whole backlog
       // renders grey and only goes blue if they happen to read something new.
       const conversation = await api.conversation(thread.conversationId).catch(() => null);
+      if (openedAt.current !== opening) return;
       peerReadSeq.current = Math.max(
         0,
         ...(conversation?.others ?? []).map((other) => other.readCursorSeq ?? 0),
@@ -590,6 +621,9 @@ export const useShush = () => {
       );
 
       const history = await api.history(thread.conversationId).catch(() => null);
+      // Somebody opened another thread while this one was loading; these rows are not for it.
+      if (openedAt.current !== opening) return;
+      setHistoryLoading(false);
       if (!history) {
         appendEvent("That conversation could not be opened.");
         return;
@@ -604,7 +638,11 @@ export const useShush = () => {
           mine && (message.seq ?? 0) <= peerReadSeq.current ? "read" : "delivered",
         );
       });
-      if (!history.messages.length) {
+      if (thread.ended) {
+        // Said once, in the thread, where the date pills are -- not as a line of text squeezed
+        // in next to the button at the bottom.
+        appendEvent("This conversation is over.");
+      } else if (!history.messages.length) {
         appendEvent("Nothing here yet. Say something.");
       }
       const newest = history.messages[history.messages.length - 1];
@@ -649,7 +687,11 @@ export const useShush = () => {
     // A local-only tag has no row on the server to save against or match on -- sending its
     // negative id to either call would just be a request the server has no way to satisfy.
     const realIds = selected.filter((id) => id > 0);
+    const attempt = ++findAttempt.current;
     await api.saveInterests(realIds);
+    // Stopped while saving: sending now would put us back in the pool with the screen saying
+    // we are not looking -- a searcher nobody can see, matched with whoever asks next.
+    if (attempt !== findAttempt.current) return;
     send({ type: "find", interestIds: realIds, patience });
     if (hintTimer.current) clearTimeout(hintTimer.current);
     // Matching skips anyone already a friend, so with a few friends and nobody else waiting it
@@ -664,6 +706,7 @@ export const useShush = () => {
   }, [patience, selected, send]);
 
   const cancelFind = useCallback(() => {
+    findAttempt.current += 1;
     send({ type: "cancelFind" });
     setSearching(false);
     setFindStatus("");
@@ -999,6 +1042,7 @@ export const useShush = () => {
     requests,
     conversations: nonFriendConversations,
     listsLoading,
+    historyLoading,
     interests,
     selected,
     setSelected: updateSelected,

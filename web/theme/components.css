@@ -1,0 +1,119 @@
+/*
+  The handful of shapes everything else is built from. A new control reaches for one of these
+  before it reaches for its own classes -- that is what keeps a button in a modal looking like a
+  button in the sidebar.
+*/
+@utility btn {
+  @apply cursor-pointer rounded-full border px-4 py-2 transition
+         disabled:cursor-not-allowed disabled:opacity-45;
+  border-color: var(--color-line);
+  background-color: var(--color-surface-2);
+  color: var(--color-body);
+}
+
+@utility btn-ghost {
+  @apply cursor-pointer rounded-full border px-4 py-2 transition
+         disabled:cursor-not-allowed disabled:opacity-45;
+  border-color: var(--color-line);
+  background-color: transparent;
+  color: var(--color-body);
+}
+
+@utility btn-primary {
+  @apply cursor-pointer rounded-full border border-transparent px-4 py-2 font-semibold
+         transition disabled:cursor-not-allowed disabled:opacity-45;
+  color: var(--color-on-brand);
+  background-image: var(--gradient-brand);
+  box-shadow: var(--shadow-brand);
+}
+
+/* A round, icon-only button with no frame -- the composer's paperclip and camera. */
+@utility btn-icon {
+  @apply grid flex-none cursor-pointer place-items-center rounded-full transition
+         disabled:cursor-not-allowed disabled:opacity-45;
+  color: var(--color-muted);
+}
+
+@utility field {
+  @apply w-full rounded-full border px-4 py-2.5 outline-none;
+  border-color: var(--color-line);
+  background-color: var(--color-surface-2);
+  color: var(--color-body);
+}
+
+@utility panel {
+  @apply rounded-2xl border;
+  border-color: var(--color-line);
+  background-color: color-mix(in srgb, var(--color-surface) 92%, transparent);
+  box-shadow: var(--shadow-panel);
+}
+
+@utility section-label {
+  @apply mb-3 text-[11px] font-bold tracking-[0.09em] uppercase;
+  color: var(--color-faint);
+}
+
+/* Unread counts and the like: a small filled pill in the brand colour. */
+@utility badge {
+  @apply grid h-5 min-w-5 flex-none place-items-center rounded-full px-1.5 text-[11px] font-bold;
+  color: var(--color-on-brand);
+  background-image: var(--gradient-brand);
+}
+
+.btn:hover:not(:disabled),
+.btn-ghost:hover:not(:disabled) { background-color: var(--color-surface-3); }
+.btn-icon:hover:not(:disabled) { color: var(--color-body); background-color: var(--color-surface-3); }
+.btn-primary:hover:not(:disabled) { background-image: var(--gradient-brand-hover); }
+.btn:active:not(:disabled),
+.btn-ghost:active:not(:disabled),
+.btn-icon:active:not(:disabled),
+.btn-primary:active:not(:disabled) { transform: translateY(1px); }
+
+:focus-visible { outline: 2px solid var(--color-brand); outline-offset: 2px; }
+
+/* The message box is a frame around a textarea and the camera button: the frame shows focus. */
+.composer:focus-within { border-color: var(--color-brand); }
+.composer textarea:focus-visible { outline: none; }
+
+/*
+  "Find someone" while a search runs. The button itself is the status: the same pill, outlined
+  in the brand colour, with one softly pulsing dot before the word. Same footprint as the idle
+  button, so the swap moves nothing around it.
+*/
+.find-searching {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.6rem;
+  min-width: 190px;
+  cursor: pointer;
+  border-radius: 999px;
+  border: 1px solid var(--color-brand);
+  padding: 0.5rem 1.25rem;
+  font-weight: 600;
+  color: var(--color-body);
+  background-color: var(--color-brand-soft);
+}
+.find-searching:active { transform: translateY(1px); }
+
+.find-pulse {
+  position: relative;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--color-brand);
+  box-shadow: 0 0 8px var(--color-brand);
+}
+.find-pulse::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  border: 1.5px solid var(--color-brand);
+  animation: find-ping 1.4s ease-out infinite;
+}
+@keyframes find-ping { from { transform: scale(1); opacity: 0.9; } to { transform: scale(3); opacity: 0; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .find-pulse::after { animation: none; }
+}

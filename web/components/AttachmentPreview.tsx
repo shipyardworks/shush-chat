@@ -26,7 +26,7 @@ export const AttachmentPreview = ({
     <div
       id="attachmentPreview"
       className="fixed inset-0 z-50 flex flex-col backdrop-blur-sm"
-      style={{ backgroundColor: "rgb(4 5 9 / 0.86)" }}
+      style={{ backgroundColor: "var(--color-scrim-strong)" }}
     >
       <div className="flex items-center gap-3 p-4">
         <button

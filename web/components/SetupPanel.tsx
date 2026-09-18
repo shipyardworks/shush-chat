@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { findByTag, normaliseTag } from "@/lib/interests";
 import type { Interest } from "@/lib/types";
 
 const PATIENCE = [
@@ -196,9 +197,6 @@ const Ticker = ({ items, onToggle }: { items: Interest[]; onToggle: (id: number)
   );
 };
 
-/** Lowercase, one run of letters and digits, nothing else -- the same shape a curated tile has. */
-const normaliseTag = (label: string) => label.toLowerCase().replace(/[^a-z0-9]+/g, "");
-
 export const SetupPanel = ({
   interests,
   selected,
@@ -258,7 +256,14 @@ export const SetupPanel = ({
   const submitDraft = () => {
     const tag = normaliseTag(draft);
     if (!tag) return;
-    onAddInterest(tag);
+    // Typing a word that is already a tile picks that tile. Making a private copy of it is how
+    // "history" ended up on screen twice -- one of them matchable, the other not.
+    const existing = findByTag(ordered, tag);
+    if (existing) {
+      if (!selected.includes(existing.id)) setSelected([...selected, existing.id]);
+    } else if (!findByTag(customInterests, tag)) {
+      onAddInterest(tag);
+    }
     setDraft("");
   };
 
@@ -331,15 +336,10 @@ export const SetupPanel = ({
           onClick={searching ? onCancelFind : onFind}
         >
           {searching ? (
-            <span className="relative flex items-center justify-center gap-2.5">
-              <span className="find-radar" aria-hidden />
-              <span className="find-label">{findStatus ? "Still looking" : "Looking"}</span>
-              <span className="find-dots" aria-hidden>
-                <i />
-                <i />
-                <i />
-              </span>
-            </span>
+            <>
+              <span className="find-pulse" aria-hidden />
+              {findStatus ? "Still looking" : "Looking"}
+            </>
           ) : (
             "Find someone"
           )}

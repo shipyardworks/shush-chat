@@ -19,19 +19,19 @@ export const Brand = () => {
         viewBox="0 0 32 32"
         width={26}
         height={26}
-        style={{ boxShadow: "0 4px 12px rgb(109 77 251 / 0.4)", borderRadius: 9 }}
+        style={{ boxShadow: "var(--shadow-brand)", borderRadius: 9 }}
       >
         <defs>
           <linearGradient id={gradientId} x1="0" y1="0" x2="1" y2="1">
-            <stop offset="0" stopColor="#7c5cff" />
-            <stop offset="1" stopColor="#38d0e0" />
+            <stop offset="0" style={{ stopColor: "var(--color-brand)" }} />
+            <stop offset="1" style={{ stopColor: "var(--color-cyan)" }} />
           </linearGradient>
         </defs>
         <rect width="32" height="32" rx="8" fill={`url(#${gradientId})`} />
         <g
           transform="translate(-.5 1.5)"
           fill="none"
-          stroke="#fff"
+          style={{ stroke: "var(--color-on-brand)" }}
           strokeWidth="3"
           strokeLinecap="round"
           strokeLinejoin="round"

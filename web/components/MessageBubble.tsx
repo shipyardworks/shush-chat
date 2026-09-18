@@ -12,8 +12,12 @@ import { Ticks } from "./Ticks";
 const SWIPE_TO_REPLY = 60;
 const LONG_PRESS_MS = 450;
 
-/** What is open above a message, if anything. Exactly one at a time. */
-type PopoverMode = "menu" | "picker" | "sheet" | null;
+/**
+ * What is open above a message, if anything. "actions" is reactions and actions together,
+ * anchored beside the dots that opened it; "sheet" is the same thing anchored to the bubble,
+ * for a long press. "picker" is reactions alone, from tapping the reactions already on it.
+ */
+type PopoverMode = "actions" | "picker" | "sheet" | null;
 
 const Quoted = ({
   message,
@@ -84,7 +88,6 @@ export const MessageBubble = ({
   const startX = useRef(0);
   const dragging = useRef(false);
   const longPress = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const longPressTouch = useRef(false);
   const moved = useRef(false);
 
   const myReaction = (message.reactions ?? []).find((r) => r.userId === meId)?.emoji ?? null;
@@ -107,7 +110,7 @@ export const MessageBubble = ({
     if (!anchor) return;
 
     const box = popover.current?.getBoundingClientRect();
-    const fallback = { menu: [176, 180], picker: [260, 46], sheet: [230, 150] }[mode];
+    const fallback = { actions: [260, 190], picker: [260, 46], sheet: [260, 190] }[mode];
     const size = { width: box?.width ?? fallback[0], height: box?.height ?? fallback[1] };
     const viewport = { width: window.innerWidth, height: window.innerHeight };
 
@@ -132,18 +135,17 @@ export const MessageBubble = ({
    * Swipe to reply, in the direction the bubble sits: your own messages pull left, theirs pull
    * right. Anything else is a scroll, so a vertical-ish drag cancels rather than fights it.
    *
-   * <p>Long press opens the picker on a mouse, the combined sheet on touch -- the dots button
-   * already covers the full menu for a mouse, so touch is the only pointer that needs both.
+   * <p>Long press opens reactions and actions together, the same as the dots do -- choosing an
+   * emoji is one tap from there, not "React" and then an emoji.
    */
   const onPointerDown = (event: React.PointerEvent) => {
     if (message.deleted) return;
     startX.current = event.clientX;
     dragging.current = true;
     moved.current = false;
-    longPressTouch.current = event.pointerType === "touch";
     cancelLongPress();
     longPress.current = setTimeout(() => {
-      if (!moved.current) setMode(longPressTouch.current ? "sheet" : "picker");
+      if (!moved.current) setMode("sheet");
     }, LONG_PRESS_MS);
   };
 
@@ -192,9 +194,6 @@ export const MessageBubble = ({
     <>
       <MenuItem testId="menuReply" label="Reply" onClick={act(onReply)} />
       <MenuItem testId="menuCopy" label="Copy" onClick={act(copy)} />
-      {mode === "menu" && (
-        <MenuItem testId="menuReact" label="React" onClick={() => setMode("picker")} />
-      )}
       {/* Yours deletes for both; theirs only for you. Two different acts, so two labels. */}
       <MenuItem
         testId="menuDelete"
@@ -223,11 +222,11 @@ export const MessageBubble = ({
           transform: `translateX(${offset}px)`,
           transition: dragging.current ? "none" : "transform .18s ease",
           touchAction: "pan-y",
-          color: mine && !message.deleted ? "#fff" : "var(--color-body)",
+          color: mine && !message.deleted ? "var(--color-on-brand)" : "var(--color-body)",
           background: message.deleted
             ? "var(--color-surface-2)"
             : mine
-              ? "linear-gradient(135deg, #6d4dfb, var(--color-brand-2))"
+              ? "var(--gradient-brand)"
               : "var(--color-surface-2)",
           border: `1px solid ${mine && !message.deleted ? "transparent" : "var(--color-line-soft)"}`,
           borderRadius: mine ? "16px 16px 5px 16px" : "16px 16px 16px 5px",
@@ -249,7 +248,7 @@ export const MessageBubble = ({
         }}
         onContextMenu={(event) => {
           event.preventDefault();
-          if (!message.deleted) setMode("menu");
+          if (!message.deleted) setMode("actions");
         }}
       >
         <div style={{ padding: isImage && quoted ? "6px 8px 0" : undefined }}>
@@ -294,7 +293,7 @@ export const MessageBubble = ({
             </span>
           </button>
         ) : (
-          <div>{message.body}</div>
+          <div className="whitespace-pre-wrap">{message.body}</div>
         )}
 
         {!isImage && (
@@ -340,7 +339,7 @@ export const MessageBubble = ({
           type="button"
           data-testid="messageMenuButton"
           aria-label="Message actions"
-          onClick={() => setMode((current) => (current === "menu" ? null : "menu"))}
+          onClick={() => setMode((current) => (current === "actions" ? null : "actions"))}
           className="pointer-coarse:hidden pointer-fine:opacity-0 pointer-fine:hover:!opacity-100 self-center transition pointer-fine:group-hover:opacity-60"
           style={{ order: mine ? -1 : 1, padding: "0 6px", color: "var(--color-muted)" }}
         >
@@ -366,34 +365,17 @@ export const MessageBubble = ({
             </div>
           )}
 
-          {mode === "menu" && (
+          {(mode === "actions" || mode === "sheet") && (
             <div
               ref={popover}
-              data-testid="messageMenu"
-              /* Anchored to the dots that opened it, not to the far edge of the bubble: the
-                 pointer is already there, and every pixel it has to travel is friction. */
-              className="z-[70] flex min-w-44 flex-col overflow-hidden rounded-xl border py-1 shadow-xl"
-              style={{
-                ...floating,
-                borderColor: "var(--color-line)",
-                backgroundColor: "var(--color-surface-2)",
-              }}
-              onClick={(event) => event.stopPropagation()}
-            >
-              {menuItems}
-            </div>
-          )}
-
-          {mode === "sheet" && (
-            <div
-              ref={popover}
-              data-testid="messageSheet"
+              data-testid="messageActions"
               className="z-[70] flex flex-col gap-2"
               style={floating}
               onClick={(event) => event.stopPropagation()}
             >
               <EmojiPicker chosen={myReaction} onPick={(emoji) => act(() => onReact(emoji))()} />
               <div
+                data-testid="messageMenu"
                 className="flex min-w-44 flex-col overflow-hidden rounded-xl border py-1 shadow-xl"
                 style={{ borderColor: "var(--color-line)", backgroundColor: "var(--color-surface-2)" }}
               >

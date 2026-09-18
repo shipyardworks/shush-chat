@@ -9,7 +9,6 @@ import { ChatPanel } from "@/components/ChatPanel";
 import { ImageViewer } from "@/components/ImageViewer";
 import { ProfileDialog, type ProfileTarget } from "@/components/ProfileDialog";
 import { RequestsMenu } from "@/components/RequestsMenu";
-import { SaveAccount } from "@/components/SaveAccount";
 import { SetupPanel } from "@/components/SetupPanel";
 import { Sidebar } from "@/components/Sidebar";
 import { ThemeToggle } from "@/components/ThemeToggle";
@@ -143,13 +142,6 @@ export default function Chat() {
         <ThemeToggle />
       </header>
 
-      {shush.session?.user.anonymous && (
-        <SaveAccount
-          onSave={shush.saveAccount}
-          className={chatOpenOnPhone ? "hidden sm:flex" : "flex"}
-        />
-      )}
-
       <main
         className={`relative grid min-h-0 flex-1 ${
           signedIn ? "grid-cols-1 sm:grid-cols-[240px_1fr] lg:grid-cols-[272px_1fr]" : "grid-cols-1"
@@ -175,8 +167,12 @@ export default function Chat() {
             onFindSomeone={() => {
               setMobileView("detail");
               shush.goHome();
+              // "Find someone" finds someone: with interests already picked there is nothing
+              // left to ask, so the search starts here rather than behind a second button.
+              if (!shush.searching && shush.selected.length > 0) void shush.findSomeone();
             }}
             onLogout={shush.logout}
+            onSaveAccount={shush.saveAccount}
           />
         )}
 
@@ -186,7 +182,7 @@ export default function Chat() {
         {shush.session && mobileView === "list" && (
           <div
             className="absolute inset-0 z-20 sm:hidden"
-            style={{ backgroundColor: "rgb(4 5 9 / 0.4)" }}
+            style={{ backgroundColor: "var(--color-scrim-soft)" }}
             onClick={() => setMobileView("detail")}
           />
         )}
@@ -204,6 +200,11 @@ export default function Chat() {
               typing={shush.typing}
               isFriendConversation={shush.isFriendConversation}
               ended={shush.ended}
+              historyLoading={shush.historyLoading}
+              searching={shush.searching}
+              canFind={shush.selected.length > 0}
+              onFind={shush.findSomeone}
+              onCancelFind={shush.cancelFind}
               friendRequestSent={shush.friendRequestSent}
               onBack={() => setMobileView("list")}
               onOpenPeer={() =>
