@@ -33,6 +33,7 @@ export const MessageList = ({
   onDeleteForEveryone,
   onHideForMe,
   onOpenImage,
+  onBackgroundTap,
 }: {
   items: ChatItem[];
   meId: string | undefined;
@@ -42,6 +43,8 @@ export const MessageList = ({
   onDeleteForEveryone: (message: Message) => void;
   onHideForMe: (message: Message) => void;
   onOpenImage: (mediaKey: string) => void;
+  /** Tapping anywhere here, message bubbles included, drops the keyboard -- same as WhatsApp. */
+  onBackgroundTap?: () => void;
 }) => {
   const bottom = useRef<HTMLDivElement>(null);
   const list = useRef<HTMLDivElement>(null);
@@ -85,6 +88,7 @@ export const MessageList = ({
       id="messages"
       ref={list}
       onScroll={onScroll}
+      onClick={onBackgroundTap}
       className="scroll-elegant flex min-h-0 flex-1 flex-col gap-[3px] overflow-y-auto p-6"
     >
       {items.map((item, index) => {

@@ -181,6 +181,7 @@ export const ChatPanel = ({
         onDeleteForEveryone={onDeleteForEveryone}
         onHideForMe={onHideForMe}
         onOpenImage={onOpenImage}
+        onBackgroundTap={() => composer.current?.blur()}
       />
 
       {replyingTo && (

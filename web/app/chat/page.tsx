@@ -31,6 +31,26 @@ export default function Chat() {
     setMobileView("detail");
   }, [shush.view, shush.conversationId]);
 
+  // Keeps --app-height (globals.css) equal to the actual visible viewport. iOS Safari's own
+  // scroll-the-focused-input-into-view heuristic is what dragged the header off the top before
+  // this: once the shell's real height already matches what's visible above the keyboard, the
+  // composer sits inside it with nothing left for iOS to scroll to reveal.
+  useEffect(() => {
+    const viewport = window.visualViewport;
+    if (!viewport) return;
+    const sync = () => {
+      document.documentElement.style.setProperty("--app-height", `${viewport.height}px`);
+      window.scrollTo(0, 0);
+    };
+    sync();
+    viewport.addEventListener("resize", sync);
+    viewport.addEventListener("scroll", sync);
+    return () => {
+      viewport.removeEventListener("resize", sync);
+      viewport.removeEventListener("scroll", sync);
+    };
+  }, []);
+
   const setup = (bare: boolean) => (
     <SetupPanel
       interests={shush.interests}

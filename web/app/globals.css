@@ -34,10 +34,11 @@ html[data-theme="light"] {
   --color-faint: #8b93a7;
 }
 
-/* 100% is fixed to the layout viewport, so it stays put when the mobile keyboard opens and
-   leaves whatever is pinned to the flex column's end stranded below the fold. dvh tracks the
-   real visible viewport instead, so the composer follows the keyboard up naturally. */
-html, body { height: 100%; height: 100dvh; }
+/* dvh tracks the URL bar showing/hiding, but iOS Safari deliberately does not shrink it for the
+   on-screen keyboard -- Apple's own answer to that is the visualViewport API, not a CSS unit.
+   --app-height is kept in sync with window.visualViewport.height by chat/page.tsx; every other
+   page never sets it, so the dvh fallback is what they get. */
+html, body { height: 100%; height: 100dvh; height: var(--app-height, 100dvh); }
 
 body {
   margin: 0;
