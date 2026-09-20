@@ -5,7 +5,7 @@ import { createPortal } from "react-dom";
 import type { ChatItem, Message } from "@/lib/types";
 import type { Peer } from "@/lib/useShush";
 import { Avatar } from "./Avatar";
-import { Menu, PersonPlus } from "./icons";
+import { Menu, PersonCheck, PersonPlus } from "./icons";
 import { MessageList } from "./MessageList";
 
 export const ChatPanel = ({
@@ -70,7 +70,8 @@ export const ChatPanel = ({
   onOpenCamera: () => void;
   /** Phone only -- opens the chats drawer over this conversation without closing it. */
   onBack?: () => void;
-  setupPanel: React.ReactNode;
+  /** Given the picker's own close, so the panel can draw it beside its first heading. */
+  setupPanel: (onClose: () => void) => React.ReactNode;
 }) => {
   const [draft, setDraft] = useState("");
   const [picking, setPicking] = useState(false);
@@ -193,17 +194,28 @@ export const ChatPanel = ({
           <>
             {/* Still offered after somebody leaves: asking to keep them is the one thing a
                 finished conversation is still for. Icon-only on phone -- two full-text
-                pills left no room for the peer's own name. */}
+                pills left no room for the peer's own name.
+
+                Which is why the icon itself has to carry the state. Disabled plus greyed was
+                the whole signal on a phone, and a greyed-out plus reads as "not available",
+                not as "you already did this" -- so the plus becomes a tick once the request
+                is out, the same way the words beside it change on a wider screen. */}
             <button
               id="addFriend"
               type="button"
+              data-sent={friendRequestSent ? "true" : "false"}
               title={friendRequestSent ? "Request sent" : "Add friend"}
               aria-label={friendRequestSent ? "Request sent" : "Add friend"}
               disabled={friendRequestSent}
-              className="btn-ghost flex h-9 flex-none items-center justify-center gap-1.5 rounded-full px-2.5 disabled:opacity-50 sm:px-3.5"
+              className="btn-ghost flex h-9 flex-none items-center justify-center gap-1.5 rounded-full px-2.5 disabled:cursor-default disabled:opacity-100 sm:px-3.5"
+              style={friendRequestSent ? { color: "var(--color-brand)" } : undefined}
               onClick={onAskToKeep}
             >
-              <PersonPlus className="h-[18px] w-[18px]" />
+              {friendRequestSent ? (
+                <PersonCheck className="h-[18px] w-[18px]" />
+              ) : (
+                <PersonPlus className="h-[18px] w-[18px]" />
+              )}
               <span className="hidden sm:inline">{friendRequestSent ? "Request sent" : "Add friend"}</span>
             </button>
             {!ended && (
@@ -400,18 +412,11 @@ export const ChatPanel = ({
               if (event.target === event.currentTarget) closePicker();
             }}
           >
+            {/* The close is drawn by the panel itself, beside its own first heading -- see
+                SetupPanel's `onClose`. It used to sit on a row of its own above it, which on a
+                phone is a whole empty band above a picker that is already tight for height. */}
             <div role="dialog" aria-modal="true" className="panel rise w-full max-w-[620px] p-4 sm:p-7">
-              <div className="mb-1 flex justify-end">
-                <button
-                  type="button"
-                  aria-label="Close"
-                  className="btn-ghost px-3"
-                  onClick={closePicker}
-                >
-                  ✕
-                </button>
-              </div>
-              {setupPanel}
+              {setupPanel(closePicker)}
             </div>
           </div>,
           document.body,

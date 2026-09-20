@@ -184,6 +184,47 @@ class RetentionJobsIT extends AbstractIT {
     }
 
     /**
+     * An image in an anonymous conversation outlives the night.
+     *
+     * <p>pre-plan.md 5 point 4 sets this window at 24 hours against a real storage bill. There
+     * is no such bill while this is not open to the public, and the owner asked for the images
+     * to stay -- so both tiers are 30 days, and both are env-configurable rather than edited
+     * back. Recorded in implementation.md and the README's Open Choices.
+     *
+     * <p>Guarded because nothing guarded it before: the window was a number in a yaml file that
+     * no test ever read, and the sweep that acts on it is the one piece of this system that
+     * deletes a person's content on a timer.
+     */
+    @Test
+    void anImageInAnAnonymousConversationSurvivesTheNight() {
+        TestUsers.Session alice = testUsers.newAnonymous();
+        TestUsers.Session bob = testUsers.newAnonymous();
+        UUID conversationId = testUsers.createConversation(alice, bob);
+
+        String key = rest.exchange("/api/media/upload-url", HttpMethod.POST,
+                        new HttpEntity<>(java.util.Map.of(
+                                "conversationId", conversationId.toString(),
+                                "mime", "image/png",
+                                "sizeBytes", 1024), testUsers.authorised(alice)),
+                        com.fasterxml.jackson.databind.JsonNode.class)
+                .getBody().path("key").asText();
+
+        // Neither of them has an account, which is the tier that used to expire overnight.
+        assertThat(mediaObjects.findById(key).orElseThrow().getExpiresAt())
+                .as("an anonymous conversation's images are not on a 24-hour clock")
+                .isAfter(java.time.Instant.now().plus(java.time.Duration.ofDays(2)));
+
+        // Confirmed, then aged past the old deadline. The sweep must leave it alone.
+        confirmMedia(key);
+        ageMediaByDays(key, 3);
+        jobs.purgeMedia();
+
+        assertThat(mediaObjects.findById(key))
+                .as("three days old, and still here")
+                .isPresent();
+    }
+
+    /**
      * Every replica runs the same timers, so without the lock a purge would run three times at
      * once -- three transactions competing to delete the same rows.
      */
@@ -223,6 +264,24 @@ class RetentionJobsIT extends AbstractIT {
         assertThat(ran.get())
                 .as("contending ticks are skipped, never queued up to run later")
                 .isLessThan(16);
+    }
+
+    /** Marks the row the way a completed upload does, so the sweep judges it on expiry alone. */
+    private void confirmMedia(String key) {
+        inTransaction(em -> em.createNativeQuery(
+                        "update media_objects set status = 'confirmed' where key = :key")
+                .setParameter("key", key)
+                .executeUpdate());
+    }
+
+    /** Moves both timestamps back together, so the row stays internally consistent. */
+    private void ageMediaByDays(String key, int days) {
+        inTransaction(em -> em.createNativeQuery(
+                        "update media_objects set created_at = created_at - make_interval(days => :days), "
+                                + "expires_at = expires_at - make_interval(days => :days) where key = :key")
+                .setParameter("days", days)
+                .setParameter("key", key)
+                .executeUpdate());
     }
 
     private void backdateMediaCreation(String key) {

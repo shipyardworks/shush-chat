@@ -473,17 +473,28 @@ test("the paperclip sits inside the message box, beside the camera", async ({ br
   expect(box.width).toBeGreaterThan(alice.viewportSize()!.width * 0.7);
 });
 
-/** Asking to keep someone and being asked are two ends of one thing, so they look alike. */
-test("add friend is the same person icon the requests button uses", async ({ browser }) => {
+/**
+ * Both icons are built on a person, and each says what it is for beyond that.
+ *
+ * <p>The requests button used to be a bare person, which named who it was about and nothing
+ * about why it was a button -- it now sits in an envelope. Add friend keeps its plus. What
+ * this guards is that neither is a plain figure and that they are not the same drawing.
+ */
+test("the requests and add-friend icons each say more than just person", async ({ browser }) => {
   const alice = await arriveOnPhone(browser);
   const bob = await arriveOnPhone(browser);
   await matchThem(alice, bob);
 
-  const person = await alice.locator("#requestsButton svg circle").getAttribute("r");
-  const addFriend = await alice.locator("#addFriend svg circle").getAttribute("r");
-  expect(addFriend, "drawn from the same person, not a bare plus").toBe(person);
-  // A plus alongside it, which is what makes it "add" rather than "someone".
-  expect(await alice.locator("#addFriend svg path").count()).toBeGreaterThan(1);
+  const paths = (page: Page, id: string) => page.locator(`${id} svg path`).count();
+  expect(await alice.locator("#requestsButton svg circle").count()).toBe(1);
+  expect(await alice.locator("#addFriend svg circle").count()).toBe(1);
+  // A head plus a body is two paths at most; anything beyond that is the part that adds meaning.
+  expect(await paths(alice, "#requestsButton"), "an envelope around the person").toBeGreaterThan(1);
+  expect(await paths(alice, "#addFriend"), "a plus beside the person").toBeGreaterThan(1);
+
+  const requests = await alice.locator("#requestsButton svg").innerHTML();
+  const addFriend = await alice.locator("#addFriend svg").innerHTML();
+  expect(requests, "two different jobs should not be one drawing").not.toBe(addFriend);
 });
 
 /**
@@ -524,4 +535,203 @@ test("the shell fills the visible viewport after it changes size", async ({ brow
     // The composer is the last thing in the shell, so anything below it is the dead band.
     expect(state.gapUnderComposer, `no empty band under the composer at ${height}`).toBeLessThan(24);
   }
+});
+
+/**
+ * "Asked already" has to be legible on a phone, where the words are not there to say it.
+ *
+ * <p>The button was disabled the whole time -- the server has always deduped a second ask --
+ * but on a narrow screen the only sign of it was a greyed-out plus, which reads as "not
+ * available" rather than "you already did this". So the plus becomes a tick, and the greying
+ * goes: a dimmed control says the app is refusing, and this one is reporting.
+ */
+test("on a phone, asking to keep someone turns the plus into a tick", async ({ browser }) => {
+  const alice = await arriveOnPhone(browser);
+  const bob = await arriveOnPhone(browser);
+  await matchThem(alice, bob);
+
+  const button = alice.locator("#addFriend");
+  const plus = await button.locator("svg").innerHTML();
+  await expect(button).toBeEnabled();
+  await expect(button).toHaveAttribute("data-sent", "false");
+  // The words are the desktop half of this, and they are not on screen here.
+  await expect(button.locator("span")).toBeHidden();
+
+  await button.click();
+
+  await expect(button).toBeDisabled();
+  await expect(button).toHaveAttribute("data-sent", "true");
+  await expect(button).toHaveAttribute("aria-label", "Request sent");
+  const tick = await button.locator("svg").innerHTML();
+  expect(tick, "a different icon, not the same one greyed out").not.toBe(plus);
+  // Readable, not faded into the header -- being told is not the same as being blocked.
+  const opacity = await button.evaluate((node) => parseFloat(getComputedStyle(node).opacity));
+  expect(opacity).toBeGreaterThan(0.9);
+});
+
+/** The same state, said in words, on a screen wide enough to hold them. */
+test("on a wide screen, asking to keep someone says so in words", async ({ browser }) => {
+  const alice = await arrive(browser);
+  const bob = await arrive(browser);
+  await matchThem(alice, bob);
+
+  const button = alice.locator("#addFriend");
+  await expect(button).toContainText("Add friend");
+  await button.click();
+  await expect(button).toContainText("Request sent");
+  await expect(button).toBeDisabled();
+});
+
+/**
+ * The picker's close shares the heading's line.
+ *
+ * <p>It used to sit on a row of its own above it. On a 390px screen that row is a band of
+ * nothing with one button in it, above a panel that is already fighting for height against the
+ * interests, the patience dial and the button underneath them.
+ */
+test("the picker's close button sits on the heading's own line", async ({ browser }) => {
+  const alice = await arriveOnPhone(browser);
+  const bob = await arriveOnPhone(browser);
+  await matchThem(alice, bob);
+  await alice.locator("#leave").click();
+  await bob.locator("#findSomeoneNext").click();
+
+  const modal = bob.locator("#findSomeoneModal");
+  await expect(modal).toBeVisible();
+  const close = (await modal.locator("#closePicker").boundingBox())!;
+  const heading = (await modal.getByText("What are you into?").boundingBox())!;
+
+  // Same line: each one's vertical span overlaps the other's.
+  expect(close.y).toBeLessThan(heading.y + heading.height);
+  expect(heading.y).toBeLessThan(close.y + close.height);
+  // And the close is the thing on the right of it, not stacked above.
+  expect(close.x).toBeGreaterThan(heading.x + heading.width);
+
+  await modal.locator("#closePicker").click();
+  await expect(modal).toHaveCount(0);
+});
+
+/** Nothing above the photo but a way out of it. */
+test("the image viewer offers only close", async ({ browser }) => {
+  const alice = await arrive(browser);
+  const bob = await arrive(browser);
+  await matchThem(alice, bob);
+
+  await alice.locator("#imageInput").setInputFiles(shape("square.png"));
+  await alice.locator("#sendAttachment").click();
+  await expect(alice.locator("#messages img")).toBeVisible();
+  await alice.locator("[data-testid=openImage]").first().click();
+
+  const viewer = alice.locator("#imageViewer");
+  await expect(viewer).toBeVisible();
+  await expect(viewer.locator("#closeImageViewer")).toBeVisible();
+  await expect(viewer.getByRole("link", { name: "Open" })).toHaveCount(0);
+  await expect(viewer.locator("a")).toHaveCount(0);
+});
+
+/**
+ * A long press on a message belongs to the app, not to the browser.
+ *
+ * <p>Holding a bubble opens reactions and the actions menu. iOS Safari's own long press
+ * selects the word under the finger and raises Copy | Search with Google over the top of it,
+ * so both menus opened at once and the app's was the one that went away. Copy is already in
+ * the app's menu and copies the whole message rather than one word, so nothing is lost by
+ * taking the gesture -- on touch. A mouse keeps native selection, which is a different gesture
+ * with nothing to collide with.
+ */
+test("a message bubble is not selectable by a long press on touch", async ({ browser }) => {
+  const alice = await arriveOnPhone(browser);
+  const bob = await arriveOnPhone(browser);
+  await matchThem(alice, bob);
+  await say(alice, "hold me");
+
+  const bubble = alice.locator("#messages .bubble").last();
+  await expect(bubble).toBeVisible();
+  const style = await bubble.evaluate((node) => {
+    const own = getComputedStyle(node);
+    const inner = node.querySelector("div");
+    return {
+      select: own.userSelect || own.webkitUserSelect,
+      innerSelect: inner ? getComputedStyle(inner).userSelect : "none",
+    };
+  });
+  expect(style.select).toBe("none");
+  expect(style.innerSelect, "the text inside it too, not just the box").toBe("none");
+
+  /*
+   * `-webkit-touch-callout` is the half of this only iOS can enforce -- Blink does not
+   * implement it, so `getComputedStyle` here reports nothing whatever the stylesheet says.
+   * What is checkable in this browser is that the declaration actually shipped: it is the
+   * rule that stops iOS raising a share sheet over a photo being tapped, and a build step
+   * quietly dropping it as unknown is exactly the failure this would otherwise miss.
+   */
+  const declared = await alice.evaluate(async () => {
+    // The served bytes, not the CSSOM: Blink drops a declaration it does not implement while
+    // parsing, so `cssRules` cannot see this one however correctly it shipped.
+    const sheets = [...document.querySelectorAll<HTMLLinkElement>('link[rel="stylesheet"]')];
+    const bodies = await Promise.all(sheets.map((link) => fetch(link.href).then((r) => r.text())));
+    return bodies.some((css) => css.includes("-webkit-touch-callout"));
+  });
+  expect(declared, "the iOS-only half of this is in the stylesheet").toBe(true);
+
+  // And the app's own menu is what a long press produces.
+  await bubble.dispatchEvent("pointerdown", { pointerType: "touch", clientX: 40, clientY: 40 });
+  await expect(alice.getByRole("button", { name: "Reply" })).toBeVisible();
+});
+
+/** A mouse is a different gesture, and copying part of a message is a real thing people do. */
+test("a message bubble stays selectable with a mouse", async ({ browser }) => {
+  const alice = await arrive(browser);
+  const bob = await arrive(browser);
+  await matchThem(alice, bob);
+  await say(alice, "select me");
+
+  const bubble = alice.locator("#messages .bubble").last();
+  const select = await bubble.evaluate((node) => getComputedStyle(node).userSelect);
+  expect(select).not.toBe("none");
+});
+
+/**
+ * A photo that is gone on purpose says so.
+ *
+ * <p>A shared image is deleted once its retention window is up -- `shush.storage.*-retention`
+ * in `application.yml`. So a photo that will not load has often not failed at all, it has
+ * expired; and "Photo unavailable" over a deliberate expiry reads as the app being broken,
+ * which is how it was reported. The window itself is guarded in `RetentionJobsIT`; what is
+ * guarded here is only what the bubble says when the object is gone.
+ *
+ * <p>The API answering 404 is what "the object has been reaped" looks like from the browser
+ * (`unknown_media`), so that is what is served here. Nothing about the client is stubbed.
+ */
+test("an expired photo says it expired, not that it is unavailable", async ({ browser }) => {
+  const alice = await arrive(browser);
+  const bob = await arrive(browser);
+  await bob.route("**/api/media/**", (route) =>
+    route.fulfill({ status: 404, contentType: "application/json", body: '{"code":"unknown_media"}' }),
+  );
+  await matchThem(alice, bob);
+
+  await alice.locator("#imageInput").setInputFiles(shape("square.png"));
+  await alice.locator("#sendAttachment").click();
+
+  const fallback = bob.locator("[data-testid=imageFallback]");
+  await expect(fallback).toBeVisible();
+  await expect(fallback).toHaveText(/expired/i);
+});
+
+/** Anything else is still just "unavailable" -- the app must not blame retention for a fault. */
+test("a photo that fails for any other reason does not claim to have expired", async ({
+  browser,
+}) => {
+  const alice = await arrive(browser);
+  const bob = await arrive(browser);
+  await bob.route("**/api/media/**", (route) => route.fulfill({ status: 500, body: "" }));
+  await matchThem(alice, bob);
+
+  await alice.locator("#imageInput").setInputFiles(shape("square.png"));
+  await alice.locator("#sendAttachment").click();
+
+  const fallback = bob.locator("[data-testid=imageFallback]");
+  await expect(fallback).toBeVisible();
+  await expect(fallback).toHaveText(/unavailable/i);
 });

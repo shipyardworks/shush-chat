@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { mediaUrl } from "@/lib/api";
 
 /**
@@ -9,8 +9,14 @@ import { mediaUrl } from "@/lib/api";
  * <p>An `<img>` that fails to load used to just be an `<img>` that failed to load: whatever the
  * browser's own broken-image glyph looks like, sized however the surrounding layout happened to
  * squeeze it, with the alt text bleeding through underneath. This renders the same box either
- * way, so a 404 from an object store that has since expired the key reads as "this photo is
- * gone" rather than as the app itself being broken.
+ * way.
+ *
+ * <p>And it says which of the two it is. A shared image is deleted once its retention window
+ * is up (`application.yml`, `shush.storage.*-retention`), so a photo that will not load has
+ * often not failed at all -- it has expired. "Photo unavailable" over a deliberate expiry
+ * reads as the app being broken, and the owner reported it as exactly that. An `<img>` cannot
+ * report a status code, so the box asks the API once, and only after a failure:
+ * `unknown_media` is a 404 and means the object has been reaped.
  */
 export const ChatImage = ({
   mediaKey,
@@ -25,7 +31,30 @@ export const ChatImage = ({
   className?: string;
   style?: React.CSSProperties;
 }) => {
-  const [broken, setBroken] = useState(false);
+  // Keyed by the image they are about, not plain booleans: this component is reused for the
+  // next message in the list, and a flag left over from the last one would draw a failure box
+  // over a photo that is perfectly fine.
+  const [failed, setFailed] = useState<string | null>(null);
+  const [gone, setGone] = useState<string | null>(null);
+  const broken = failed === mediaKey;
+  const expired = gone === mediaKey;
+
+  useEffect(() => {
+    if (!broken) return;
+    let live = true;
+    // HEAD, so nothing is downloaded a second time just to find out why it did not arrive once.
+    fetch(mediaUrl(mediaKey), { method: "HEAD" })
+      .then((response) => {
+        if (live && response.status === 404) setGone(mediaKey);
+      })
+      .catch(() => {
+        // Offline, or the API is unreachable. That is the "unavailable" wording already on
+        // screen, so there is nothing to correct.
+      });
+    return () => {
+      live = false;
+    };
+  }, [broken, mediaKey]);
 
   if (broken) {
     return (
@@ -46,7 +75,7 @@ export const ChatImage = ({
           <path d="M4 17.5 9 12l3 3 3.5-3.5L20 16" />
           <path d="M4 20 20 4" />
         </svg>
-        <span className="text-[12px]">Photo unavailable</span>
+        <span className="text-[12px]">{expired ? "Photo expired" : "Photo unavailable"}</span>
       </div>
     );
   }
@@ -58,7 +87,7 @@ export const ChatImage = ({
       src={mediaUrl(mediaKey)}
       draggable={false}
       onClick={onClick}
-      onError={() => setBroken(true)}
+      onError={() => setFailed(mediaKey)}
       className={className}
       style={style}
     />
