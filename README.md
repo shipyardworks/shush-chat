@@ -690,11 +690,20 @@ dimming goes. A dimmed control should mean the app is refusing; this one is repo
 one thing a full-size viewer has already done. Saving it is the long press every phone offers,
 and that works whether or not a link is drawn next to it.
 
-**An expired photo says "expired", not "unavailable".** Images in a conversation where nobody has
-saved an account are deleted after 24 hours, on purpose. "Photo unavailable" over a deliberate
-expiry reads as the app being broken -- it was reported as exactly that. The box asks the API
-once, only after a load has failed, and a 404 (`unknown_media`) means the object has been
-reaped rather than anything having gone wrong.
+**Images are kept for thirty days whether or not anyone has an account.** `pre-plan.md` 5 point
+4 sets two tiers -- 24 hours anonymous, 30 days with an account -- and is right that the
+difference is a real storage bill rather than an invented restriction. There is no such bill
+yet: nothing here is open to the public, and a photo vanishing overnight costs more today than
+the bytes do. Both are `SHUSH_MEDIA_RETENTION_ANONYMOUS` / `SHUSH_MEDIA_RETENTION_SAVED`, so
+putting the two tiers back is an environment variable and a restart. `expires_at` is stamped on
+the row at upload, so the setting governs the next upload only -- migration `V11` restamps the
+images already stored, measured from when each was created.
+
+**An expired photo says "expired", not "unavailable".** Whatever the window is, an image is
+eventually deleted on purpose, and "Photo unavailable" over a deliberate expiry reads as the app
+being broken -- it was reported as exactly that. The box asks the API once, only after a load has
+failed, and a 404 (`unknown_media`) means the object has been reaped rather than anything having
+gone wrong.
 
 **Infrastructure and running it**
 

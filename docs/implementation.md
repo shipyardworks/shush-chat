@@ -37,7 +37,7 @@ presenting laptop figures as a headline number.
 
 | Suite | Count | Notes |
 | ----- | ----- | ----- |
-| Integration (`api`) | 187 | Real Postgres, Redis, Redpanda, Elasticsearch, MinIO via Testcontainers. Nothing mocked |
+| Integration (`api`) | 188 | Real Postgres, Redis, Redpanda, Elasticsearch, MinIO via Testcontainers. Nothing mocked |
 | Unit (`api`) | 9 | Pure logic only |
 | Browser (`web`, Playwright) | 72 | Journey, session, setup, layout, interactions and connection specs, against a stack that is already running |
 | Harness self-tests (`bench`) | 17 | Each invariant fed a violating stream, asserted to report it |
@@ -233,6 +233,30 @@ conversation open and the drawer over it, the app header is deliberately hidden,
 the start screen from inside the drawer is gone with the button. Leaving the conversation, or
 its ending, still offers it.
 
+### Images are kept for thirty days, anonymous or not
+
+`pre-plan.md` 5 point 4 sets two tiers: 24 hours without an account, 30 days with one, and says
+plainly that the difference is a real storage bill rather than an invented restriction. The
+reasoning holds and the bill does not exist yet -- nothing here is open to the public, and an
+image vanishing overnight costs the owner more today than the bytes do. Both tiers are 30 days,
+on the owner's instruction.
+
+Both are `${SHUSH_MEDIA_RETENTION_ANONYMOUS}` / `${SHUSH_MEDIA_RETENTION_SAVED}` rather than
+literals, so putting `pre-plan.md`'s rule back is an environment variable and a restart, not an
+edit and a rebuild. `pre-plan.md` itself is unchanged: it is the settled product, and this is
+the record of what was built instead.
+
+The setting alone would not have done it. `expires_at` is stamped onto the row when the image is
+uploaded, so the setting only ever governs the *next* upload -- every image already in the
+bucket keeps the deadline it was created with, and the sweep goes on honouring it. Migration
+`V11` restamps them, from `created_at` rather than `now()` so a picture sent three weeks ago
+does not get a fresh month, and only where the new window is longer so it can never shorten
+anything. Nothing already swept comes back; those bytes are gone.
+
+Guarded by `RetentionJobsIT#anImageInAnAnonymousConversationSurvivesTheNight`, because nothing
+guarded it before: the window was a number in a yaml file no test ever read, driving the one
+sweep in this system that deletes a person's content on a timer.
+
 ### `docs/SCHEMA.md` is generated
 
 Anticipated by `plan.md` §2.1 and now real: written by `SchemaDocIT` on every `./mvnw verify`,
@@ -305,12 +329,13 @@ disconnected user from the wait pool -- coming back without that leaves the butt
 a pool nobody is in.
 
 **One thing reported as a bug this round was not one.** Images sent yesterday were gone today.
-They are deleted on purpose: in a conversation where neither person has saved an account, media
-is kept for 24 hours (`shush.storage.anonymous-retention`, and `pre-plan.md` 5 point 4), and
-`purged 2 media object(s)` is in the scheduler's log at the hour it happened. What was wrong was
-only what the app said about it -- "Photo unavailable", which reads as breakage. An expired
-image now says "Photo expired": the box asks the API once, after a failure, and `unknown_media`
-(404) is the object having been reaped rather than anything having gone wrong.
+They were deleted on purpose: in a conversation where neither person had saved an account, media
+was kept for 24 hours (`pre-plan.md` 5 point 4), and `purged 2 media object(s)` is in the
+scheduler's log at the hour it happened. What was wrong was only what the app said about it --
+"Photo unavailable", which reads as breakage. An expired image now says "Photo expired": the box
+asks the API once, after a failure, and `unknown_media` (404) is the object having been reaped
+rather than anything having gone wrong. The window itself was then changed on the owner's
+instruction -- see below.
 
 **32 needs `platform` too.** The fix is a `/shush-media/` route on the app's own origin
 (`platform/edge/nginx/conf.d/shush.conf`, with MinIO joining the edge network under the alias
