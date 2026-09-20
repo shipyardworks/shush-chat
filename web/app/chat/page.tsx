@@ -302,6 +302,24 @@ export default function Chat() {
         />
       )}
 
+      {/* Said out loud, because the whole app rides on this one socket. While it was possible
+          for the connection to be gone with nothing on screen saying so, every press that
+          needed it -- find, send, leave -- looked like it had worked and had not. */}
+      {shush.session && !shush.connected && (
+        <div
+          id="reconnecting"
+          role="status"
+          className="fixed top-2 left-1/2 z-[70] -translate-x-1/2 rounded-full border px-3.5 py-1.5 text-[12px] shadow-lg"
+          style={{
+            borderColor: "var(--color-line)",
+            backgroundColor: "var(--color-surface-2)",
+            color: "var(--color-muted)",
+          }}
+        >
+          Reconnecting…
+        </div>
+      )}
+
       {viewing && <ImageViewer mediaKey={viewing} onClose={() => setViewing(null)} />}
 
       <ProfileDialog

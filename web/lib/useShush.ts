@@ -135,8 +135,21 @@ export const useShush = () => {
   // draws placeholders instead of looking like a conversation where nothing was ever said.
   const [historyLoading, setHistoryLoading] = useState(false);
   const [attachment, setAttachment] = useState<Attachment | null>(null);
+  // Whether the live connection is actually up. Everything real-time rides on one socket, so
+  // when it is down the app has to say so rather than accept presses it cannot deliver.
+  const [connected, setConnected] = useState(false);
 
   const socket = useRef<WebSocket | null>(null);
+  // The token this browser holds, kept so the socket can be rebuilt without signing in again.
+  const jwt = useRef<string | null>(null);
+  // Set only when this component is going away, so an intentional close is told apart from
+  // the network dropping one.
+  const leaving = useRef(false);
+  const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const reconnectAttempt = useRef(0);
+  // Frames written while the socket was not open. A find or a message must not evaporate
+  // because a phone was in somebody's pocket when it was pressed.
+  const queued = useRef<Record<string, unknown>[]>([]);
   const seen = useRef(new Set<number>());
   const lastDay = useRef<string | null>(null);
   const peerReadSeq = useRef(0);
@@ -158,6 +171,11 @@ export const useShush = () => {
   // Bumped by every find and every cancel. A find still waiting on its interests to save checks
   // it before sending, so a cancel pressed in that gap cannot be overtaken by the find it undid.
   const findAttempt = useRef(0);
+  // The search that is still on screen, if any. Closing a socket drops that user from the
+  // server's wait pool, so a reconnect has to put the search back rather than leave the button
+  // spinning over a pool nobody is in.
+  const liveFind = useRef<Record<string, unknown> | null>(null);
+  const searchingRef = useRef(false);
 
   useEffect(() => {
     conversationRef.current = conversationId;
@@ -174,10 +192,81 @@ export const useShush = () => {
   useEffect(() => {
     meRef.current = session?.user.id ?? null;
   }, [session]);
+  useEffect(() => {
+    searchingRef.current = searching;
+  }, [searching]);
 
-  const send = useCallback((frame: Record<string, unknown>) => {
-    socket.current?.send(JSON.stringify(frame));
+  /** Re-run after every reconnect: assigned once the callbacks it needs exist. */
+  const onReconnected = useRef<() => void>(() => {});
+
+  /**
+   * Opens the live socket, and keeps opening it.
+   *
+   * <p>There used to be exactly one socket, built during sign-in and never rebuilt. Nothing
+   * reopened it, so the first close was permanent: a phone locked for a minute, a switch from
+   * wifi to mobile data, a replica restarting. The app kept rendering as though it were
+   * connected -- HTTP still worked, because fetch opens its own connection every time -- while
+   * every websocket frame after that point went nowhere. That is what "none of the matching is
+   * happening" was: `PUT /api/interests/mine` landed, the `find` frame behind it did not, and
+   * the server never heard of the search the screen was showing.
+   */
+  const openSocket = useCallback(() => {
+    if (leaving.current || !jwt.current) return;
+    const live = socket.current;
+    if (live && (live.readyState === WebSocket.OPEN || live.readyState === WebSocket.CONNECTING)) {
+      return;
+    }
+    if (reconnectTimer.current) {
+      clearTimeout(reconnectTimer.current);
+      reconnectTimer.current = null;
+    }
+
+    const ws = new WebSocket(socketUrl(jwt.current));
+    socket.current = ws;
+    ws.addEventListener("message", (event) =>
+      frameHandler.current(JSON.parse(event.data as string)),
+    );
+    ws.addEventListener("open", () => {
+      reconnectAttempt.current = 0;
+      setConnected(true);
+      const pending = queued.current;
+      queued.current = [];
+      pending.forEach((frame) => ws.send(JSON.stringify(frame)));
+      onReconnected.current();
+    });
+    ws.addEventListener("close", () => {
+      // An old socket finishing its close after a newer one replaced it is not a disconnect.
+      if (socket.current !== ws) return;
+      setConnected(false);
+      if (leaving.current) return;
+      // Backed off and capped: a laptop waking from sleep must not hammer the box, and a
+      // one-second blip must not cost the app ten seconds of being deaf.
+      const wait = Math.min(8_000, 400 * 2 ** reconnectAttempt.current);
+      reconnectAttempt.current += 1;
+      reconnectTimer.current = setTimeout(openSocket, wait);
+    });
   }, []);
+
+  /**
+   * Never drops a frame on the floor.
+   *
+   * <p>`WebSocket.send()` on a CLOSED or CLOSING socket throws nothing and delivers nothing --
+   * the single most expensive line in this file, because it made a dead connection look
+   * exactly like a working one. Anything written while the socket is down is held and flushed
+   * on the next open instead.
+   */
+  const send = useCallback(
+    (frame: Record<string, unknown>) => {
+      const ws = socket.current;
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify(frame));
+        return;
+      }
+      queued.current.push(frame);
+      openSocket();
+    },
+    [openSocket],
+  );
 
   const reloadFriends = useCallback(async () => {
     try {
@@ -288,6 +377,9 @@ export const useShush = () => {
       viewRef.current = "chat";
       setFindStatus("");
       setSearching(false);
+      // Whatever we were looking for, we are not looking for it any more -- a reconnect must
+      // not put a finished search back into the pool from under an open conversation.
+      liveFind.current = null;
       setTyping(false);
       if (hintTimer.current) clearTimeout(hintTimer.current);
     },
@@ -586,27 +678,74 @@ export const useShush = () => {
     setSelected(initial);
     rememberSelected(initial);
 
+    jwt.current = next.jwt;
     await new Promise<void>((resolve) => {
-      const ws = new WebSocket(socketUrl(next.jwt));
-      ws.addEventListener("message", (event) =>
-        frameHandler.current(JSON.parse(event.data as string)),
-      );
-      ws.addEventListener("open", () => resolve());
-      // The server drops a closed socket from the wait pool, so the search is over too.
-      ws.addEventListener("close", () => setSearching(false));
-      socket.current = ws;
+      openSocket();
+      const ws = socket.current;
+      if (!ws) {
+        resolve();
+        return;
+      }
+      ws.addEventListener("open", () => resolve(), { once: true });
+      // A first connection that never opens must not leave sign-in hanging for ever -- the
+      // reconnect loop is already running behind this, so carry on and let it arrive.
+      ws.addEventListener("close", () => resolve(), { once: true });
     });
 
     // All three before anything can be pushed, so a request or a chat that was already waiting
     // is on screen from the moment you sign in.
     await Promise.all([reloadFriends(), reloadRequests(), reloadConversations()]);
     setListsLoading(false);
-  }, [reloadConversations, reloadFriends, reloadRequests]);
+  }, [openSocket, reloadConversations, reloadFriends, reloadRequests]);
 
   useEffect(() => {
     void start();
-    return () => socket.current?.close();
+    return () => {
+      leaving.current = true;
+      if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
+      socket.current?.close();
+    };
   }, [start]);
+
+  /**
+   * What a reconnect has to put back.
+   *
+   * <p>Assigned every render rather than wired once, so it always closes over the current
+   * callbacks. The lists are refetched because anything pushed while the socket was down was
+   * pushed at nobody, and the search is re-sent because the server drops a disconnected user
+   * from the wait pool -- without this, reconnecting leaves the button spinning over a pool
+   * this person is no longer in.
+   */
+  useEffect(() => {
+    onReconnected.current = () => {
+      void refreshLists();
+      if (searchingRef.current && liveFind.current) send(liveFind.current);
+    };
+  });
+
+  /**
+   * A phone coming back from the lock screen, or a laptop from sleep, does not always fire
+   * `close` promptly -- the socket can sit in a half-open state the browser has not noticed.
+   * These are the two moments worth checking rather than waiting for a timer.
+   */
+  useEffect(() => {
+    const wake = () => {
+      if (document.visibilityState === "visible") {
+        reconnectAttempt.current = 0;
+        openSocket();
+      }
+    };
+    const online = () => {
+      reconnectAttempt.current = 0;
+      openSocket();
+    };
+    document.addEventListener("visibilitychange", wake);
+    window.addEventListener("online", online);
+    return () => {
+      document.removeEventListener("visibilitychange", wake);
+      window.removeEventListener("online", online);
+    };
+  }, [openSocket]);
 
   /* ---------- opening a conversation ---------- */
 
@@ -716,7 +855,9 @@ export const useShush = () => {
     // Stopped while saving: sending now would put us back in the pool with the screen saying
     // we are not looking -- a searcher nobody can see, matched with whoever asks next.
     if (attempt !== findAttempt.current) return;
-    send({ type: "find", interestIds: realIds, patience });
+    const frame = { type: "find", interestIds: realIds, patience };
+    liveFind.current = frame;
+    send(frame);
     if (hintTimer.current) clearTimeout(hintTimer.current);
     // Matching skips anyone already a friend, so with a few friends and nobody else waiting it
     // looks exactly like a broken matcher. Say so rather than spin forever.
@@ -731,6 +872,7 @@ export const useShush = () => {
 
   const cancelFind = useCallback(() => {
     findAttempt.current += 1;
+    liveFind.current = null;
     send({ type: "cancelFind" });
     setSearching(false);
     setFindStatus("");
@@ -1079,6 +1221,7 @@ export const useShush = () => {
 
   return {
     session,
+    connected,
     view,
     friends,
     requests,
