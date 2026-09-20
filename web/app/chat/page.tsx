@@ -12,6 +12,7 @@ import { RequestsMenu } from "@/components/RequestsMenu";
 import { SetupPanel } from "@/components/SetupPanel";
 import { Sidebar } from "@/components/Sidebar";
 import { ThemeToggle } from "@/components/ThemeToggle";
+import { Menu } from "@/components/icons";
 import { useShush } from "@/lib/useShush";
 
 /**
@@ -38,15 +39,32 @@ export default function Chat() {
   useEffect(() => {
     const viewport = window.visualViewport;
     if (!viewport) return;
+    let settle = 0;
     const sync = () => {
       document.documentElement.style.setProperty("--app-height", `${viewport.height}px`);
       window.scrollTo(0, 0);
     };
+    /**
+     * Measure, then measure again once the animation is over.
+     *
+     * iOS reports the viewport *during* the keyboard transition, and the bottom browser
+     * toolbar collapses on a different frame from the keyboard rising. A single reading taken
+     * mid-flight is short by roughly the toolbar's height, and the shell keeps that wrong
+     * height afterwards -- which is the band of empty page that appeared under the composer
+     * whenever the message box was tapped. Re-reading after it stops moving costs one extra
+     * measurement and is the only thing that gets the final number.
+     */
+    const syncAndSettle = () => {
+      sync();
+      clearTimeout(settle);
+      settle = window.setTimeout(sync, 300);
+    };
     sync();
-    viewport.addEventListener("resize", sync);
+    viewport.addEventListener("resize", syncAndSettle);
     viewport.addEventListener("scroll", sync);
     return () => {
-      viewport.removeEventListener("resize", sync);
+      clearTimeout(settle);
+      viewport.removeEventListener("resize", syncAndSettle);
       viewport.removeEventListener("scroll", sync);
     };
   }, []);
@@ -66,12 +84,19 @@ export default function Chat() {
       onFind={shush.findSomeone}
       onCancelFind={shush.cancelFind}
       bare={bare}
-      onBack={bare ? undefined : () => setMobileView("list")}
     />
   );
 
   const signedIn = Boolean(shush.session);
-  const chatOpenOnPhone = mobileView === "detail" && shush.view === "chat";
+  /**
+   * A conversation owns the whole phone screen, drawer open or not.
+   *
+   * <p>This used to also require the drawer to be shut, so opening the drawer from a chat
+   * brought the app header back with it -- the page appeared to swap its own header on the way
+   * in, for no reason the person could see. The chat has its own header with the same burger
+   * in it; the app header belongs to the screen you find people on.
+   */
+  const chatOpenOnPhone = shush.view === "chat";
 
   return (
     // flex, not a 2-row grid: a grid-rows-[auto_1fr] here put main in row 2 by explicit template,
@@ -89,6 +114,21 @@ export default function Chat() {
           backgroundColor: "color-mix(in srgb, var(--color-surface) 70%, transparent)",
         }}
       >
+        {/* The same burger the chat header has, so the drawer opens from one control wherever
+            you are. It replaced a "<" on the setup panel that pointed back at a list the
+            panel was not inside. */}
+        {shush.session && (
+          <button
+            id="openDrawer"
+            type="button"
+            aria-label="Chats and friends"
+            title="Chats and friends"
+            onClick={() => setMobileView("list")}
+            className="btn-ghost -ml-2 grid h-9 w-9 flex-none place-items-center rounded-full p-0 sm:hidden"
+          >
+            <Menu />
+          </button>
+        )}
         {/* The logo goes back to the start screen. It only changes what is on screen: walking
             out of a live conversation by navigating away would be a silent disappearance
             for the other person, and Leave is still the button that ends it. */}
@@ -116,7 +156,7 @@ export default function Chat() {
                 friend: false,
               })
             }
-            className="flex cursor-pointer items-center gap-2 rounded-full border px-3 py-1.5 text-xs"
+            className="flex cursor-pointer items-center gap-2 rounded-full border p-1 text-xs sm:px-3 sm:py-1.5"
             style={{
               borderColor: "var(--color-line)",
               backgroundColor: "var(--color-surface-2)",
@@ -124,7 +164,12 @@ export default function Chat() {
             }}
           >
             <Avatar id={shush.session.user.id} name={shush.session.user.displayName} size={18} />
-            <span data-testid="myName">{shush.session.user.displayName}</span>
+            {/* Your own name, on the one screen where you already know it, was wrapping to two
+                lines and taking the width the burger now uses. The avatar still opens the same
+                profile; sm and up has the room and keeps the name. */}
+            <span data-testid="myName" className="hidden sm:inline">
+              {shush.session.user.displayName}
+            </span>
           </button>
         )}
 
@@ -178,10 +223,12 @@ export default function Chat() {
 
         {/* The drawer only covers ~78% of the screen -- this is the rest of it, tapping
             anywhere on it (the visible sliver of chat, or the dimmed part over it) closes the
-            drawer instead of the chat behind it having no way back without it. */}
+            drawer instead of the chat behind it having no way back without it.
+            fixed, not absolute: the drawer stands in front of the app header rather than
+            starting underneath it, so opening it no longer swaps one header for another. */}
         {shush.session && mobileView === "list" && (
           <div
-            className="absolute inset-0 z-20 sm:hidden"
+            className="fixed inset-0 z-40 sm:hidden"
             style={{ backgroundColor: "var(--color-scrim-soft)" }}
             onClick={() => setMobileView("detail")}
           />

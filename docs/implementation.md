@@ -94,6 +94,16 @@ interest that two strangers can genuinely be told they share. `Interest.id` move
 hand-seeded `smallint` to an identity column for the same reason — a tag typed at 3am has no
 number to bring with it.
 
+**Only half of that reversal shipped.** The endpoint was built and the client never called it:
+the Next.js rewrite carried the *old* reasoning forward in a comment that said so out loud, kept
+every typed tag in `localStorage` under a negative id, and filtered negative ids out of both
+`PUT /api/interests/mine` and the `find` frame. So the shared-vocabulary fix existed on the
+server and no tag ever reached it. That is bug 34, and it is why this section belongs next to
+the bug table rather than on its own: a divergence recorded as done with one end of it missing.
+The client now creates the row and selects the id it gets back, a tag saved under an old
+negative id claims its shared row on the next load, and the input lowercases as it is typed so
+what is on screen is what will be created.
+
 ### Reactions and deletes bypass Redpanda by design
 
 `plan.md` does not cover message interactions; they were added afterward, and deliberately do
@@ -166,6 +176,34 @@ holds the shared controls (`btn`, `btn-primary`, `btn-icon`, `field`, `panel`, `
 searching state). Components read `var(--…)` and write no literal colours. The cyan shield and
 the purple-to-cyan gradient on the save prompt were exactly what that rule exists to stop.
 
+### The phone shell: one drawer control, and a header that gets out of the way
+
+`pre-plan.md` settles behaviour, not layout, so none of this contradicts it -- but it is a
+visible departure from what the client did before, and the reasoning is worth keeping.
+
+A conversation now owns the whole phone screen. The app header stays hidden while a chat is
+open *whether or not the drawer is open*: it used to reappear underneath the drawer, so opening
+the chats list looked like the page swapping its own header on the way in. The drawer is
+`fixed` and full height rather than `absolute` inside `main`, so it stands in front of that
+header instead of starting below it.
+
+One control opens it, from both places, and it is a burger. The chat offered `<`, which
+promises to leave a conversation and instead opened a drawer over it; the setup panel offered
+its own `<` pointing back at a list it was not inside. Both are gone, and the setup panel is
+centred in the screen it used to sit at the top of.
+
+The chat's name bar slides shut while the conversation is scrolled down and returns on the way
+up, which is the room that bar was costing on a 390px screen. Three separate faults came out of
+that one behaviour (bugs 35, 36, 37), all of them in telling the reader's scrolling apart from
+the scrolling the feature itself causes.
+
+Your own name has left the phone header -- the avatar beside it still opens the same profile --
+to make room for the burger; `sm` and up keeps the name. The paperclip moved inside the message
+box next to the camera, which is that button's width plus a gap handed back to the thing being
+typed. And `html, body` now clip horizontally: one element wider than the viewport had been
+turning the whole page into a canvas that could be dragged sideways, with the send button off
+the right edge of it.
+
 ### `docs/SCHEMA.md` is generated
 
 Anticipated by `plan.md` §2.1 and now real: written by `SchemaDocIT` on every `./mvnw verify`,
@@ -212,11 +250,29 @@ Each was invisible to code review and would have shipped.
 | 30 | A history load that finished after another thread was opened appended its messages to that thread | reading the load path while adding its skeleton |
 | 31 | iOS offered its password / card / address AutoFill bar above the message box: it ignores `autocomplete="off"` on an `<input>` it cannot rule out as a form field. It never offers it for a `<textarea>` | a phone screenshot |
 | 32 | On the live domain every image upload failed with "could not reach image storage": uploads go from the browser straight to a URL presigned for `SHUSH_S3_PUBLIC_ENDPOINT`, and the platform only ever exposed MinIO on the box's loopback — plain http, unreachable from any phone and blocked under an https page anyway. It had only ever worked on localhost | a phone screenshot on the live site |
+| 33 | The route added for 32 was `limit_except PUT`, and a read is a 302 to a presigned **GET** on that same origin -- so every image ever sent came back 403 from nginx and drew "Photo unavailable". Uploads had been working the whole time; the bytes were in the bucket | a phone screenshot, confirmed against `access forbidden by rule` in the nginx error log |
+| 34 | A typed interest never reached the server: the client kept it in `localStorage` under a negative id and `find` filtered negative ids out, so searching with only a typed tag sent an *empty* interest list -- which the matcher rejects outright. Two people who had each typed the same word sat on "Looking" for ever and were never candidates for one another, with nothing on either screen saying so | the owner typing the same tag on two phones |
+| 35 | The conversation header slid shut when a *message arrived*: following the live end scrolls the list, in the same direction a reader does, and nothing told the two apart | the first assertion of the test written for the header |
+| 36 | Collapsing that header gives the message list its height, and a list parked at the bottom has its `scrollTop` clamped by the same amount -- a scroll event the other way, which reopened the header, which shortened the list, which closed it. A flicker that settled nowhere | the same test, measuring height rather than trusting the attribute |
+| 37 | Collapsing the padded header directly floored at 29px: a `border-box` element cannot be squeezed below its own padding plus border, so `0fr` left a strip that would not close | measuring the collapsed height instead of asserting the attribute |
+| 38 | The four aspect-ratio fixtures were `readFileSync` from an absolute `/tmp` path belonging to the machine the test was written on. The files were never committed, so eight layout tests failed with `ENOENT` on every other clone -- including the next one of this repo | running the suite on this machine for the first time |
+| 39 | The swipe test released the strip mid-movement, which hands Chromium a velocity and it flings. What it then measured was the browser's momentum, not the app's hold-off -- it passed only when the machine was loaded enough not to fling, and failed six times out of six run on its own | running that one test by itself |
+| 40 | "You both like " with nothing after it: the matched-conversation subtitle resolved ids against the browsable catalogue, which deliberately excludes anything anyone typed | the new matching test asserting the interest is *named*, not just that a chat opened |
+| 41 | The check written for 3 could not fail. It looked for elements sticking out past the viewport and skipped any with a clipping ancestor -- and the `overflow-x: hidden` added to `body` in the same change made *every* element on the page have one, so the list was empty by construction | asking it to find a 3000px div, which it did not |
 
-**32 needs `platform` too.** The fix is a PUT-only `/shush-media/` route on the app's own origin
+**32 needs `platform` too.** The fix is a `/shush-media/` route on the app's own origin
 (`platform/edge/nginx/conf.d/shush.conf`, with MinIO joining the edge network under the alias
 `syamdev-minio`), and `SHUSH_S3_PUBLIC_ENDPOINT` set to the site's own URL. The bytes still
-never touch the API; nginx forwards them to MinIO with the signed `Host` unchanged.
+never touch the API; nginx forwards them to MinIO with the signed `Host` unchanged. That route
+was written PUT-only, which is bug 33.
+
+**33 and 34 are the same shape as 11, 20 and 21.** Each was a silent refusal: a 403 with no log
+line the app could see, and a request the client had quietly emptied before sending. Both were
+found by asking the running system a question rather than by reading the code that caused them,
+and in both cases a test existed that covered the behaviour and was pointed somewhere harmless.
+`an image reaches the other person and actually loads` does catch 33 -- but only once
+`SHUSH_S3_PUBLIC_ENDPOINT` names the app's own origin the way the deployment does, which is now
+the default in `.env.example` rather than a laptop-only shortcut to MinIO's host port.
 
 Four of these are worth separating out, because the tests that "covered" them passed:
 

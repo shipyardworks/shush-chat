@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import type { ChatItem, Message } from "@/lib/types";
 import type { Peer } from "@/lib/useShush";
 import { Avatar } from "./Avatar";
+import { Menu, PersonPlus } from "./icons";
 import { MessageList } from "./MessageList";
 
 export const ChatPanel = ({
@@ -67,12 +68,19 @@ export const ChatPanel = ({
   onHideForMe: (message: Message) => void;
   onOpenImage: (mediaKey: string) => void;
   onOpenCamera: () => void;
-  /** Phone only -- returns to the sidebar list without closing the conversation underneath it. */
+  /** Phone only -- opens the chats drawer over this conversation without closing it. */
   onBack?: () => void;
   setupPanel: React.ReactNode;
 }) => {
   const [draft, setDraft] = useState("");
   const [picking, setPicking] = useState(false);
+  /**
+   * Phone only: the name bar slides shut while the conversation is scrolled down and comes
+   * back the moment it is scrolled up, which is what every phone chat app does with it. A
+   * header is worth its ~58px when you arrive and worth nothing while you are reading.
+   * `.chat-head` (components.css) holds the breakpoint, so sm and up never collapses.
+   */
+  const [headCollapsed, setHeadCollapsed] = useState(false);
   const file = useRef<HTMLInputElement>(null);
   const composer = useRef<HTMLTextAreaElement>(null);
 
@@ -116,6 +124,12 @@ export const ChatPanel = ({
     if (!ended) composer.current?.focus();
   }, [peer.userId, ended]);
 
+  // Opening someone else's conversation is exactly when their name matters, so it is never
+  // inherited half-shut from the thread before it.
+  useEffect(() => {
+    setHeadCollapsed(false);
+  }, [peer.userId]);
+
   useEffect(() => {
     if (!picking) return;
     const onKey = (event: KeyboardEvent) => {
@@ -129,21 +143,28 @@ export const ChatPanel = ({
 
   return (
     <div id="chat" className="flex min-h-0 flex-1 flex-col">
+      <div className="chat-head" data-collapsed={headCollapsed}>
+      {/* The clipping wrapper carries no padding or border of its own, deliberately. The row
+          below is border-box, so a padded element cannot be squeezed below its own padding
+          plus border -- collapsing it directly left a 29px strip that would not close. */}
+      <div>
       <div
         className="flex items-center gap-2 border-b px-3.5 py-3.5 sm:gap-3 sm:px-[22px]"
         style={{ borderColor: "var(--color-line-soft)" }}
       >
         {onBack && (
+          /* A burger, not a back arrow. It opens the chats drawer over this conversation
+             rather than leaving it, and "<" promised the opposite -- the same control on the
+             start screen, so one button means one thing wherever it is. */
           <button
             id="chatBack"
             type="button"
-            aria-label="Back to chats"
+            aria-label="Chats and friends"
+            title="Chats and friends"
             onClick={onBack}
             className="btn-ghost -ml-1 grid h-9 w-9 flex-none place-items-center rounded-full p-0 sm:hidden"
           >
-            <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M15 18l-6-6 6-6" />
-            </svg>
+            <Menu />
           </button>
         )}
         <button id="chatAvatar" type="button" title="View profile" onClick={onOpenPeer}>
@@ -182,9 +203,7 @@ export const ChatPanel = ({
               className="btn-ghost flex h-9 flex-none items-center justify-center gap-1.5 rounded-full px-2.5 disabled:opacity-50 sm:px-3.5"
               onClick={onAskToKeep}
             >
-              <svg viewBox="0 0 24 24" className="h-4 w-4 flex-none" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M12 5v14M5 12h14" />
-              </svg>
+              <PersonPlus className="h-[18px] w-[18px]" />
               <span className="hidden sm:inline">{friendRequestSent ? "Request sent" : "Add friend"}</span>
             </button>
             {!ended && (
@@ -205,6 +224,8 @@ export const ChatPanel = ({
           </>
         )}
       </div>
+      </div>
+      </div>
 
       <MessageList
         items={items}
@@ -220,6 +241,7 @@ export const ChatPanel = ({
         onHideForMe={onHideForMe}
         onOpenImage={onOpenImage}
         onBackgroundTap={() => composer.current?.blur()}
+        onScrollDirection={setHeadCollapsed}
       />
 
       {replyingTo && (
@@ -269,25 +291,14 @@ export const ChatPanel = ({
           </button>
         </div>
       ) : (
-        /* Laid out the way every phone chat app is: a paperclip, a box that takes the width
-           with the camera inside it, and a round send. Full-width text buttons either side
-           left almost nothing to type in on a phone. */
+        /* Laid out the way every phone chat app is: a box that takes the whole width with the
+           two attachment buttons inside it, and a round send beside it. The paperclip used to
+           sit outside the box, which cost it that button's width plus a gap on the narrowest
+           screen there is -- for a control that belongs to the message being written. */
         <div
           className="flex items-end gap-1.5 border-t px-2.5 py-2.5 sm:gap-2 sm:px-5 sm:py-3.5"
           style={{ borderColor: "var(--color-line-soft)" }}
         >
-          <button
-            id="attach"
-            type="button"
-            className="btn-icon h-10 w-10"
-            title="Attach an image"
-            aria-label="Attach an image"
-            onClick={() => file.current?.click()}
-          >
-            <svg viewBox="0 0 24 24" className="h-[22px] w-[22px]" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M21.4 11.05 12.25 20.2a5.5 5.5 0 0 1-7.78-7.78l9.19-9.19a3.67 3.67 0 0 1 5.19 5.19l-9.2 9.19a1.83 1.83 0 0 1-2.59-2.59l8.49-8.48" />
-            </svg>
-          </button>
           <input
             id="imageInput"
             ref={file}
@@ -300,7 +311,7 @@ export const ChatPanel = ({
               event.target.value = "";
             }}
           />
-          <div className="field composer flex min-w-0 flex-1 items-end gap-1 rounded-[22px] py-0 pr-1 pl-4">
+          <div className="field composer flex min-w-0 flex-1 items-end gap-0.5 rounded-[22px] py-0 pr-1 pl-4">
             {/* A textarea, not an <input>. iOS offers its password / card / address AutoFill
                 bar above the keyboard for any text input it cannot rule out as part of a form,
                 and it ignores autocomplete="off" when deciding. It never offers it for a
@@ -327,6 +338,18 @@ export const ChatPanel = ({
                 submit();
               }}
             />
+            <button
+              id="attach"
+              type="button"
+              className="btn-icon mb-0.5 h-9 w-9"
+              title="Attach an image"
+              aria-label="Attach an image"
+              onClick={() => file.current?.click()}
+            >
+              <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21.4 11.05 12.25 20.2a5.5 5.5 0 0 1-7.78-7.78l9.19-9.19a3.67 3.67 0 0 1 5.19 5.19l-9.2 9.19a1.83 1.83 0 0 1-2.59-2.59l8.49-8.48" />
+              </svg>
+            </button>
             <button
               id="camera"
               type="button"

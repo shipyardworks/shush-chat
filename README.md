@@ -593,11 +593,16 @@ anonymity. A name is given once, at the door.
 live only in `localStorage`, on the reasoning that the matcher needs a shared vocabulary and a
 tag only one person has cannot pair anyone by construction. That reasoning was sound and the
 conclusion was wrong: the fix for a private tag not being shared is to share it, not to keep it
-private. A typed tag is now a real row in `interests`, deduped by a slugified key so "Xabc",
+private. (Worth saying plainly: for a while only the server half of that reversal existed — the
+client went on keeping typed tags to itself, so two people who typed the same word could never
+be matched on it. `docs/implementation.md`, bug 34.) A typed tag is now a real row in `interests`, deduped by a slugified key so "Xabc",
 "xabc" and "  xabc  " all resolve to the same one — which is what lets two strangers who each
 typed it be told "you both like xabc" and actually mean it. `id` moved from a hand-seeded
 `smallint` to an identity column for this; nothing else about the matching pipeline changed,
 because a tag someone typed an hour ago and one seeded on day one are the same kind of row.
+The box lowercases as you type rather than quietly on the way out, so the word on screen is the
+one that gets created. A typed tag is matchable but never *offered*: nothing anyone invents is
+added to the list other people browse.
 
 **Which interests are pre-selected comes from this browser, not the server's guess.** The setup
 screen used to open with your most recent interests turned on because the server said so
@@ -652,6 +657,14 @@ hidden view would both lie to the sender and zero your own unread count.
 
 **Infrastructure and running it**
 
+- **Image bytes go through the app's own origin, not MinIO's host port.** `/shush-media/` on
+  the shared nginx carries a presigned PUT or GET straight to MinIO with the signed `Host`
+  untouched, so `SHUSH_S3_PUBLIC_ENDPOINT` is the site's own URL in every environment,
+  local included. Naming MinIO directly works on a laptop and nowhere else — on a real domain
+  that port is loopback-only, and plain http under an https page is blocked regardless. Pointing
+  it at the edge locally too is what makes `npm test` exercise the deployed path: while it named
+  MinIO, the one test that asserts an image *loads* could not have caught the route being
+  write-only (`docs/implementation.md`, bug 33).
 - **Postgres publishes on host port `55432`, not `5432`.** The development machine runs a native
   Postgres bound to `0.0.0.0:5432`, which prevents Docker binding loopback `5432` at all. The
   container-side port is unchanged and `POSTGRES_PORT` overrides it.

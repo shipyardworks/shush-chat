@@ -4,13 +4,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { api } from "@/lib/api";
 import type { FriendRequest } from "@/lib/types";
-
-const Person = () => (
-  <svg viewBox="0 0 24 24" className="h-[18px] w-[18px] flex-none" fill="currentColor" aria-hidden>
-    <circle cx="12" cy="7.6" r="4.3" />
-    <path d="M3.6 20.8c0-4.4 3.8-7.3 8.4-7.3s8.4 2.9 8.4 7.3Z" />
-  </svg>
-);
+import { Person } from "./icons";
 
 /**
  * Pending friend requests, in the header rather than taking permanent space in the sidebar.

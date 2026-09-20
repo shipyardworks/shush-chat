@@ -84,11 +84,32 @@ test("on a phone the interests are the same one-line strip, swiped with one fing
     await touch("touchMove", fromX - step * 20);
     await page.waitForTimeout(16);
   }
+  // Come to rest before lifting off. Releasing mid-movement hands Chromium a velocity and it
+  // flings, and the drift that follows is the browser's momentum rather than anything this
+  // app decided -- which is what the next assertion would then be measuring. On a loaded
+  // machine the steps above are slow enough that no fling is generated and it passed by luck;
+  // run on its own it is fast enough to fling every time.
+  await page.waitForTimeout(150);
+  await touch("touchMove", fromX - 240);
+  await page.waitForTimeout(150);
   await touch("touchEnd", fromX - 240);
   const swiped = await scrollLeft(page);
   expect(swiped).toBeGreaterThan(before + 120);
-  await page.waitForTimeout(800);
-  expect(Math.abs((await scrollLeft(page)) - swiped)).toBeLessThan(6);
+
+  // Timed inside the page, not across the wire. The strip is only promised to stay put for
+  // RESUME_AFTER_MS (2.5s); a wall-clock wait plus two round trips can overrun that on a busy
+  // machine, and the stream picking up again exactly when it said it would is not a fault.
+  // Measuring in one evaluate keeps the sample well inside the window, and `waited` is
+  // asserted so a stall fails as a bad measurement rather than as a verdict on the app.
+  const held = await page.evaluate(async () => {
+    const strip = document.querySelector<HTMLElement>("#interestTicker")!;
+    const from = strip.scrollLeft;
+    const at = performance.now();
+    await new Promise((settle) => setTimeout(settle, 800));
+    return { drift: Math.abs(strip.scrollLeft - from), waited: performance.now() - at };
+  });
+  expect(held.waited, "the sample landed inside the hold window").toBeLessThan(2000);
+  expect(held.drift, "the stream does not snatch it back").toBeLessThan(6);
 
   // ...and picks up again from where the finger left it.
   await expect.poll(() => scrollLeft(page), { timeout: 6000 }).toBeGreaterThan(swiped + 5);
@@ -288,4 +309,72 @@ test("stopping a search before it reaches the server leaves nobody waiting", asy
   await seeker.waitForTimeout(4000);
   await expect(ghost.locator("#chat")).toHaveCount(0);
   await seeker.locator("#findSomeone").click();
+});
+
+/**
+ * The bug this exists for: two people typed the same word and were never matched on it.
+ *
+ * A typed tag used to live in one browser under a negative id, which `find` filtered out
+ * before sending. Searching with only a typed tag selected therefore sent an empty interest
+ * list -- which the server rejects -- so both people sat on "Looking" indefinitely and neither
+ * was ever a candidate for the other. Nothing on either screen said so.
+ */
+test("two people who type the same interest are matched on it", async ({ browser }) => {
+  const alice = await arrive(browser);
+  const bob = await arrive(browser);
+
+  // Fresh, so no earlier run's users are waiting on it and the match can only be this pair.
+  const tag = `bandersnatch${Date.now()}`;
+  for (const page of [alice, bob]) {
+    await expect(page.locator("[data-testid=interest]").first()).toBeVisible();
+    await page.locator("#addInterestInput").fill(tag);
+    await page.locator("#addInterestInput").press("Enter");
+    await expect(page.locator("[data-testid=interest]", { hasText: tag })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    // Only ever someone who actually shares it: a random match would pass this test while the
+    // interest did nothing, which is the whole failure being guarded against.
+    await page.getByRole("button", { name: "Forever" }).click();
+  }
+
+  await alice.locator("#findSomeone").click();
+  await bob.locator("#findSomeone").click();
+
+  for (const page of [alice, bob]) {
+    await expect(page.locator("#chat")).toBeVisible();
+    // Named, not merely matched. The tag is deliberately absent from the browsable catalogue,
+    // so a header built only from that list says "You both like" and then nothing.
+    await expect(page.locator("#chatSub")).toContainText(`You both like ${tag}`);
+  }
+});
+
+test("a typed interest is lowercased as it is typed, and is the same row either way", async ({
+  browser,
+}) => {
+  const alice = await arrive(browser);
+  const bob = await arrive(browser);
+
+  const tag = `snapdragon${Date.now()}`;
+  await expect(alice.locator("[data-testid=interest]").first()).toBeVisible();
+  await alice.locator("#addInterestInput").fill(tag.toUpperCase());
+  // What is on screen while typing is what will be created -- not a capitalised spelling that
+  // quietly becomes something else on the way out.
+  await expect(alice.locator("#addInterestInput")).toHaveValue(tag);
+  await alice.locator("#addInterestInput").press("Enter");
+
+  await expect(bob.locator("[data-testid=interest]").first()).toBeVisible();
+  await bob.locator("#addInterestInput").fill(tag);
+  await bob.locator("#addInterestInput").press("Enter");
+
+  for (const page of [alice, bob]) {
+    await page.getByRole("button", { name: "Forever" }).click();
+  }
+  await alice.locator("#findSomeone").click();
+  await bob.locator("#findSomeone").click();
+
+  // One typed it shouting and one typed it quietly: still one interest, so still a match.
+  for (const page of [alice, bob]) {
+    await expect(page.locator("#chatSub")).toContainText(`You both like ${tag}`);
+  }
 });

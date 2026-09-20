@@ -44,8 +44,12 @@ export const Sidebar = ({
       id="sidebar"
       /* Below sm this is a drawer over the chat behind it, not a separate full-screen page --
          it only covers ~78% so the sliver (plus the backdrop in page.tsx) stays tappable to
-         dismiss it. sm and up: back to a normal static grid column, same as before. */
-      className={`absolute inset-y-0 left-0 z-30 flex w-[78%] max-w-[340px] min-h-0 flex-col border-r shadow-xl transition-transform duration-200 ease-out sm:static sm:inset-auto sm:z-auto sm:w-auto sm:max-w-none sm:translate-x-0 sm:shadow-none sm:transition-none ${
+         dismiss it. sm and up: back to a normal static grid column, same as before.
+
+         fixed rather than absolute, so it spans the whole viewport instead of only the area
+         under the app header. Opening it used to reveal that header sitting above the drawer,
+         which read as the page changing its own header on the way in. */
+      className={`fixed inset-y-0 left-0 z-50 flex w-[78%] max-w-[340px] min-h-0 flex-col border-r shadow-xl transition-transform duration-200 ease-out sm:static sm:inset-auto sm:z-auto sm:w-auto sm:max-w-none sm:translate-x-0 sm:shadow-none sm:transition-none ${
         hiddenOnPhone ? "-translate-x-full pointer-events-none sm:pointer-events-auto" : "translate-x-0"
       }`}
       style={{ borderColor: "var(--color-line-soft)", backgroundColor: "var(--color-ink)" }}

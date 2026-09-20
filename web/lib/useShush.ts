@@ -145,6 +145,9 @@ export const useShush = () => {
   const typingSentAt = useRef(0);
   const hintTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const friendsRef = useRef<Friend[]>([]);
+  // Read while creating a typed tag, to answer "do I already have this one?" without making
+  // that callback depend on -- and be rebuilt by -- every change to the list.
+  const customInterestsRef = useRef<Interest[]>([]);
   const meRef = useRef<string | null>(null);
   // Client ids drawn optimistically and not yet confirmed. A ref, not state, because the
   // decision "patch or append" is made while handling a frame and cannot wait for a render.
@@ -165,6 +168,9 @@ export const useShush = () => {
   useEffect(() => {
     friendsRef.current = friends;
   }, [friends]);
+  useEffect(() => {
+    customInterestsRef.current = customInterests;
+  }, [customInterests]);
   useEffect(() => {
     meRef.current = session?.user.id ?? null;
   }, [session]);
@@ -302,9 +308,12 @@ export const useShush = () => {
 
       if (type === "matched") {
         const shared = (frame.sharedInterestIds as number[] | null) ?? [];
-        const labels = shared
-          .map((id) => interests.all.find((i) => i.id === id)?.label)
-          .filter(Boolean);
+        // Typed tags are looked up too, not just the catalogue. They are real shared rows but
+        // are deliberately kept out of `all` (nothing anyone typed is offered for browsing),
+        // so matching two people on one and then heading the conversation "You both like "
+        // with an empty list is exactly the case this has to cover.
+        const named = [...interests.all, ...interests.suggested, ...customInterestsRef.current];
+        const labels = shared.map((id) => named.find((i) => i.id === id)?.label).filter(Boolean);
         openConversation(
           String(frame.conversationId),
           {
@@ -545,10 +554,24 @@ export const useShush = () => {
       if (real) promoted.push(real.id);
       else if (tag && !findByTag(savedCustom, tag)) savedCustom.push(custom);
     }
-    rememberCustomInterests(savedCustom);
-    setCustomInterests(savedCustom);
-    // A local-only tag is always selected -- there is no unselected-but-remembered state for
-    // one, since it has nowhere else to live once it is off.
+    // A tag this browser saved under a negative id was never sent anywhere, so it has no row
+    // and cannot match. Claim the shared one for it now rather than leaving somebody who typed
+    // a tag last week permanently unmatchable on it with no sign that anything is wrong.
+    const shared = await Promise.all(
+      savedCustom.map(async (custom) => {
+        if (custom.id > 0) return custom;
+        try {
+          return await api.createInterest(custom.label);
+        } catch {
+          return null;
+        }
+      }),
+    );
+    const usableCustom = shared.filter((one): one is Interest => one !== null);
+    rememberCustomInterests(usableCustom);
+    setCustomInterests(usableCustom);
+    // A typed tag is always selected -- there is no unselected-but-remembered state for one,
+    // since it has nowhere else to live once it is off.
     const initial = [
       ...new Set([
         ...(savedSelection.length > 0
@@ -557,7 +580,7 @@ export const useShush = () => {
             ? catalogue.suggested.map((i) => i.id)
             : []),
         ...promoted,
-        ...savedCustom.map((interest) => interest.id),
+        ...usableCustom.map((interest) => interest.id),
       ]),
     ];
     setSelected(initial);
@@ -684,8 +707,9 @@ export const useShush = () => {
   const findSomeone = useCallback(async () => {
     setFindStatus("");
     setSearching(true);
-    // A local-only tag has no row on the server to save against or match on -- sending its
-    // negative id to either call would just be a request the server has no way to satisfy.
+    // Every selected id is a real row now, typed tags included -- the filter stays only to
+    // drop a negative one left in this browser's storage by an older build, which would be
+    // rejected by the server rather than matched on.
     const realIds = selected.filter((id) => id > 0);
     const attempt = ++findAttempt.current;
     await api.saveInterests(realIds);
@@ -967,23 +991,41 @@ export const useShush = () => {
   }, []);
 
   /**
-   * Adds a tag to this browser's own list and selects it. Nothing here calls the server: a tag
-   * only one person typed cannot match anyone by construction, so there is nothing to gain from
-   * a shared row and every reason to keep it off one -- it is remembered by this browser alone,
-   * under an id that cannot collide with a real interest's because real ids are never negative.
+   * Adds a typed tag and selects it -- as a real, shared interest, created on the server.
+   *
+   * <p>This used to keep the tag in this browser alone, under a negative id, on the reasoning
+   * that a tag only one person has cannot match anyone. The reasoning was right and the
+   * conclusion was backwards: the cure for a tag nobody else has is to put it somewhere
+   * somebody else can have it. A negative id was then filtered out of both `saveInterests` and
+   * the `find` frame, so searching with only a typed tag selected sent an empty interest list,
+   * which the server refuses outright -- two people who had each typed the same word sat
+   * looking at "Looking" forever and were never candidates for one another.
+   *
+   * <p>`POST /api/interests` dedupes by slug, so both of them come back holding the same id.
    */
-  const addInterest = useCallback((label: string) => {
+  const addInterest = useCallback(async (label: string) => {
     if (!label) return;
+    if (customInterestsRef.current.some((one) => normaliseTag(one.label) === normaliseTag(label))) {
+      return;
+    }
+    let interest: Interest;
+    try {
+      interest = await api.createInterest(label);
+    } catch {
+      // Offline, or the server said no. Adding it locally would put a tile on screen that can
+      // never match anyone and give no hint why, which is the bug this replaced.
+      return;
+    }
     setCustomInterests((current) => {
-      if (current.some((one) => one.label === label)) return current;
-      const interest: Interest = { id: -Date.now(), label };
+      if (current.some((one) => one.id === interest.id)) return current;
       const next = [...current, interest];
       rememberCustomInterests(next);
-      setSelected((selection) => {
-        const nextSelection = [...selection, interest.id];
-        rememberSelected(nextSelection);
-        return nextSelection;
-      });
+      return next;
+    });
+    setSelected((selection) => {
+      if (selection.includes(interest.id)) return selection;
+      const next = [...selection, interest.id];
+      rememberSelected(next);
       return next;
     });
   }, []);
