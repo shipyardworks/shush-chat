@@ -11,18 +11,25 @@ Build: **Maven** (`./mvnw`, the committed wrapper — never system `mvn`).
 
 ## Read before working
 
+**Start with `docs/README.md`** — the map: repo topology, architecture, invariants, and
+which file settles what. It links the rest.
+
 | File | What it settles |
 | ---- | --------------- |
-| `docs/aim.md` | Why the project exists; locked technical decisions + full rationale |
-| `docs/pre-plan.md` | Every product behaviour, in plain English |
-| `docs/plan.md` | Data model, mechanisms, phases, exit criteria |
-| `docs/deploy.md` | Hosting, cost, benchmark procedure, nginx changes |
+| `docs/README.md` | The map: three repos, architecture, invariants, working rules |
+| `docs/aim.md` | Why the project exists; locked decisions + rationale; **every product behaviour** (§Product) |
+| `docs/implementation.md` | **What was actually built**: mechanisms, data model, divergences, every bug found |
+| `docs/deploy.md` | The live box (`ssh syam-hetzner`) and the commands that deploy to it |
+| `docs/SCHEMA.md` | Generated from a real Postgres by `SchemaDocIT`. Never edit it |
 
-**Product behaviour is settled in `pre-plan.md`. Do not ask the owner product questions.**
-If something genuinely isn't covered, make the smallest reasonable choice, implement it,
-and list it under `## Open Choices` in the README.
+Older code comments cite `pre-plan.md §N` and `plan.md §N` — both were folded into the files
+above with their section numbers preserved. `docs/README.md` has the redirect table.
 
-**Technical decisions in `plan.md` §0.1 are locked.** If one proves actively wrong, stop
+**Product behaviour is settled in `docs/aim.md` §Product. Do not ask the owner product
+questions.** If something genuinely isn't covered, make the smallest reasonable choice,
+implement it, and list it under `## Open Choices` in the README.
+
+**The locked decisions in `docs/aim.md` §4 are locked.** If one proves actively wrong, stop
 and say so with evidence — never substitute silently.
 
 ## Human-only actions
@@ -37,12 +44,12 @@ The agent may write the code and run it locally. These are executed by a person,
 4. **Merging into `master` or `develop`.**
 5. **Force push or history rewrite.** `--force`, `rebase` on a pushed branch, `reset --hard`
    on shared history. If it's needed, the human does it with `--force-with-lease`.
-6. **Anything on the EC2 box** (`ssh syamdev`) or any action that spends money — instance
-   resize, volume growth, new cloud resources.
+6. **Anything on the server** (`ssh syam-hetzner`) or any action that spends money — resizing,
+   volume growth, new cloud resources. The agent commits; a human deploys (`docs/deploy.md`).
 7. **`sudo`** — installing packages, changing system config.
 8. **Destroying local state** — `docker compose down -v`, `docker system prune`, deleting
    volumes or `data/`. These wipe the dev database.
-9. **Changing a locked decision** in `plan.md` §0.1, or rewriting anything in `docs/`.
+9. **Changing a locked decision** in `docs/aim.md` §4, or rewriting anything in `docs/`.
 
 Never, by anyone: commit a secret, weaken a test to make it pass, or disable a failing
 invariant check. If the harness fails, the system is wrong.

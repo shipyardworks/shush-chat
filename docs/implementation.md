@@ -1,20 +1,26 @@
 # Shush — what is actually implemented
 
-> `plan.md` is the plan. **This file is the record of what was built**, where it diverged, and
-> why. Where the two disagree, this one is current.
->
-> Every claim here is backed by a command in `README.md` §8 that passes.
+**This is the record of what was built**, how each mechanism works, where it departed from the
+original plan, and every bug the tests found. Where this file and any other disagree, this one
+is current.
 
-**Status: all eight phases complete**, plus three rounds of work that came after the plan was
-written: a platform split, a client rewrite, and feature work beyond the original phase 8 scope
-(message interactions, per-friend unread counts, unfriending, shared custom interests, closing
-a real gap in how a conversation ends, and one open stranger conversation at a time).
-Outstanding: the benchmark on dedicated hardware and the recorded demo (`deploy.md` §3 and §4),
-both of which need a machine that is not this laptop.
+[`README.md`](README.md) is the map · [`aim.md`](aim.md) is why and what · [`SCHEMA.md`](SCHEMA.md)
+is the live schema · [`deploy.md`](deploy.md) is the box.
+
+**Status: all eight phases complete**, plus a platform split, a client rewrite, and feature work
+beyond the original scope (message interactions, per-friend unread counts, unfriending, shared
+custom interests, one open stranger conversation at a time, socket reconnection). Outstanding:
+the benchmark on dedicated hardware and the recorded demo — both need a machine that is not this
+laptop.
+
+Every claim here is backed by a command in the root [`README.md`](../README.md) §8 that passes.
 
 ---
 
-## Phases
+## Phase history
+
+The plan ran in eight phases, each ending in a command that passed or failed with no human
+judgement involved. Kept as a record; there is nothing left to do in it.
 
 | Phase | Exit criterion | State |
 | ----- | -------------- | ----- |
@@ -26,12 +32,16 @@ both of which need a machine that is not this laptop.
 | 5 — Presence, typing, receipts, unread, signup | TTL expiry, unread reset, signup preserves identity | passed |
 | 6 — Matching, friends, invites, blocks | 100× concurrent-claim test, retention jobs | passed |
 | 7 — Media and the test client | media flow + real-browser journey | passed |
-| 8 — Benchmark, README, demo | eight-section README, numbers traced to committed runs | partial — see below |
+| 8 — Benchmark, README, demo | eight-section README, numbers traced to committed runs | partial |
 
 **Phase 8 is partial by design.** The README is complete and every number in it traces to raw
 output in `bench/results/`. What is missing is the run on resized hardware with the load
 generator on a separate instance, and the recorded demo. The README says so rather than
 presenting laptop figures as a headline number.
+
+The correctness harness was built in phase 2 and hardened in phases 3 and 4 — deliberately
+before any product feature, because it is the highest-value artifact and the easiest to skip
+under time pressure.
 
 ## Test surface
 
@@ -46,29 +56,210 @@ presenting laptop figures as a headline number.
 `./mvnw clean verify` no longer drives a browser — that moved to `web`'s Playwright suite when the
 client left `api/` (see below). The two counts do not overlap.
 
+Rules that hold across all of it: **no mocked broker, ever** · no `Thread.sleep` in tests, use
+Awaitility · every bug fixed gets a regression test first · TTLs are shortened in tests so
+expiry is observed rather than assumed.
+
 ---
 
-## Divergences from `plan.md`
+## Data model
 
-Everything below is a deliberate departure, with the reason.
+[`SCHEMA.md`](SCHEMA.md) is generated from a real Postgres after every migration and is the
+truth. This is the shape and the reasoning.
+
+| Table | Holds | Worth knowing |
+| ----- | ----- | ------------- |
+| `users` | identity, `display_name`, optional `email`/`password_hash` | Signing up sets the email on the **existing** row. Nothing is migrated — that is the whole point |
+| `device_tokens` | `sha256` of the opaque browser token | The only thing connecting an anonymous account to a browser |
+| `interests`, `user_interests` | the tag vocabulary and who selected what | `interests.id` is an identity column, not hand-seeded: a tag typed at 3am has no number to bring with it |
+| `conversations` | `kind` (stranger\|friend), `state` (active\|ended\|kept), `matched_on`, `last_seq`, `purge_after` | `last_seq` is the monotonic sequence source, bumped by the writer consumer alone |
+| `conversation_participants` | `read_cursor_seq`, `unread_count`, `left_at` | Counters are maintained, never `COUNT(*)` at read time |
+| `messages` | `seq`, `kind`, `body`, `media_key`, `client_msg_id` | `unique (conversation_id, seq)` and `unique (conversation_id, sender_id, client_msg_id)` — the ordering and dedup guarantees are **database** constraints |
+| `friend_requests` | `pending` \| `accepted` \| `declined` \| `expired`, 7-day expiry | `declined` was added in `V5`; see the divergence below |
+| `friendships` | one row per pair, `user_a_id` the lexically smaller uuid | Ordered by Postgres byte order, not `UUID.compareTo` — bug 6 |
+| `blocks`, `reports` | | Reports are recorded, not acted on |
+| `media_objects` | `pending` \| `confirmed`, `expires_at` | `expires_at` is stamped at upload, so a retention change governs the next upload only |
+| `invite_links` | short code, owner, expiry | |
+| `cors_origins` | allowed origins, re-read every 15s | `V6`; an empty table permits no cross-origin browser call at all |
+
+Retention, as actually enforced by the five sweeps:
+
+| Row | Deleted when |
+| --- | --- |
+| `conversations` | `purge_after` reached **and the conversation has no messages** — the plan deleted every unkept stranger conversation; the owner asked for history of everything, so only a matched pair who never spoke is reaped |
+| `friend_requests` pending | `expires_at` reached → `expired`; the conversation goes back on the purge clock |
+| `media_objects` | `expires_at` reached (30d, both tiers — see the divergence), or `pending` for over an hour |
+| `users` anonymous, no friendships | 30 days after `last_seen_at` |
+| `unread_count` | never deleted; recomputed nightly against `read_cursor_seq` |
+
+---
+
+## Mechanisms
+
+Numbered as in the original plan, because code comments cite these numbers. Each describes what
+the system does now.
+
+### 3.1 Message ordering — the core claim
+
+1. Client sends over the socket: `{type:"send", conversationId, clientMsgId, kind, body|mediaKey}`.
+2. The receiving node validates membership and **produces to Redpanda**, `key = conversationId`,
+   `acks=all`, idempotent producer on. It does **not** write to Postgres.
+3. The node acks the sender immediately: `{type:"ack", clientMsgId, status:"sent"}`.
+4. Consumer group `chat-writer` consumes. One conversation → one partition → one consumer.
+5. In one transaction: bump `conversations.last_seq`; insert the message
+   `ON CONFLICT (conversation_id, sender_id, client_msg_id) DO NOTHING` — zero rows means a
+   duplicate, so skip the fanout and roll back the sequence bump; increment `unread_count` for
+   the recipient.
+6. The consumer publishes the persisted message to Redis channel `user:{id}` for both parties.
+7. Whichever node holds that socket writes the frame.
+
+**Why produce-then-consume rather than write-then-publish:** a dual write to two systems cannot
+be made atomic without an outbox. Making the log the write-ahead log and the consumer the only
+writer removes the dual write entirely. Rejected alternative: write to Postgres first, then
+produce — loses ordering under concurrent producers and can drop the produce after commit.
+
+Topic `chat.messages`, **12 partitions**, replication 1, 7-day retention. Listener concurrency
+is 4 per replica (12 ÷ 3), not the single-node default of 12 — otherwise the group has 36
+members for 12 partitions and every rebalance shuffles all of them.
+
+### 3.2 Deduplication
+
+`clientMsgId` is a client-generated UUID, stable across retries of one logical send. The unique
+constraint is the enforcement point; `ON CONFLICT DO NOTHING` plus a row count is the detection.
+Clients additionally drop repeats of `(conversationId, seq)` they have already seen, because
+Redis pub/sub can redeliver on reconnect.
+
+### 3.3 Cross-node fanout
+
+Subscribe to Redis channel `user:{userId}` on connect, unsubscribe on disconnect. Local registry
+is a `ConcurrentHashMap<UUID, Set<WebSocketSession>>` — a user may have several tabs. **Fanout is
+always via Redis**, even same-node: one path, so same-node cannot silently work while cross-node
+is broken. Delivery per user is ordered through a single-threaded executor per session — the
+container otherwise dispatches each frame on its own thread and reorders under load (bug 2).
+
+**Backpressure:** a session more than 1 MB behind is closed with a policy violation. A client
+that cannot keep up reconnects and re-syncs from history rather than being buffered indefinitely.
+
+### 3.4 Presence and typing
+
+| Key | Value | TTL |
+| --- | --- | --- |
+| `presence:{userId}` | nodeId | 45 s, refreshed by a 15 s heartbeat |
+| `typing:{convId}:{userId}` | `1` | 5 s |
+
+Online means the key exists; last-seen falls back to `users.last_seen_at`. Typing is throttled
+client-side to one event per 3 s and the server rejects more. Graceful disconnect deletes the
+key immediately; the TTL covers crashes. Friends' online status is a single `MGET`.
+
+### 3.5 Unread counts and read receipts
+
+Counters are maintained by the writer consumer, never computed at read time. `{type:"read",
+conversationId, seq}` sets `read_cursor_seq = max(current, seq)`, zeroes the counter and
+publishes a read event to the other participant. A nightly job recomputes from `messages` versus
+the cursor — a deliberate eventual-consistency trade, and the counter genuinely drifts when a
+read lands mid-conversation.
+
+A client acknowledges a read **only while the conversation is on screen**; acknowledging from a
+hidden view both lies to the sender and zeroes your own unread count (bug 19).
+
+### 3.6 Matching
+
+State in Redis, scoring in Elasticsearch.
+
+1. `{type:"find", interests:[...], patience: 5|10|0}` (0 = indefinite).
+2. The user enters the Redis sorted set `matchpool` (score = enqueue time) and the ES `waiting`
+   index.
+3. The server queries ES for the best-overlapping waiting user, excluding self, blocked pairs
+   and existing friends.
+4. Both are **claimed atomically** by a Redis Lua script that removes both ids only if both are
+   still present. The loser of a race retries. (Tested 100× concurrently: two matchers never
+   claim the same third user.)
+5. On success: create the conversation, delete both from `waiting`, push `matched` to both.
+6. Otherwise wait; a 500 ms tick retries.
+7. When patience elapses, match the oldest waiting user regardless of interests,
+   `matched_on = null`, and the header says so.
+
+Ranking is BM25 over tag terms — it does not weight rare interests above common ones. A
+disconnected user is dropped from the pool, which is why the client re-sends a live search on
+reconnect.
+
+### 3.7 Media
+
+`POST /api/media/upload-url` validates MIME against the image allowlist, size ≤ 5 MB, and
+membership; inserts a `pending` row; returns a presigned PUT valid 5 minutes for
+`media/{convId}/{uuid}`. The client PUTs **directly to storage** — bytes never touch the API.
+The writer consumer issues a HEAD before accepting the message: missing → rejected, present →
+`confirmed` with the real size. Reads go through `GET /api/media/**`, which authorises on
+conversation membership and 302s to a presigned GET.
+
+In the deployed stack both directions travel through nginx's `/shush-media/` route on the app's
+own origin, because SigV4 signs the `Host` header and a URL signed for `minio:9000` is
+unreachable from any browser (bugs 32, 33).
+
+### 3.8 Identity and auth
+
+- **Anonymous:** `POST /api/auth/anonymous` → a 32-byte opaque token (only `sha256` stored), a
+  generated name, `{token, jwt, user}`. The token lives in `localStorage`.
+- **Return visit:** `POST /api/auth/device {token}` → a new JWT.
+- **Signup:** `POST /api/auth/signup` with a valid JWT sets email, password hash and
+  `is_anonymous = false` on the existing row.
+- **Login:** `POST /api/auth/login` → JWT. **Sign-out** deletes the device token; the JWT itself
+  stays valid until it expires.
+- JWT is HS256, 24 h, claims `sub` and `anon`, secret from the environment with no default.
+- The WebSocket carries the JWT in the connect query string, validated before the session opens.
+
+### 3.9 Name allocation
+
+Two curated lists of ~200 words in `api/src/main/resources/names/`. Generate `Adjective Noun`,
+insert against the unique index, retry up to five times on conflict, then append a number.
+Shuffling is rate-limited to roughly 1/second by a Redis token bucket. Custom names require a
+saved account; they are validated for length and uniqueness by the same index.
+
+Shuffling lives in the profile dialog rather than the pre-match screen — see the root README's
+Open Choices.
+
+### 3.10 Scheduled jobs
+
+Five sweeps, each wrapped in `SET lock:{job} {nodeId} NX PX {lease}`: if the lock is held, skip
+this tick. **Never queue, never overlap.**
+
+| Job | Interval | Action |
+| --- | --- | --- |
+| `purge-conversations` | 5 min | Delete conversations past `purge_after` **with no messages** |
+| `expire-friend-requests` | 15 min | `pending` past `expires_at` → `expired` |
+| `purge-media` | 1 h | Objects past `expires_at`, and `pending` older than 1 h |
+| `purge-anonymous-users` | 24 h | Anonymous, no friendships, `last_seen_at` > 30 d |
+| `reconcile-unread` | 24 h | Recompute `unread_count` against the read cursor |
+
+Lease is 5 minutes: longer than any sweep should take, short enough that a node dying mid-job
+does not hold the lock for long.
+
+---
+
+## Divergences from the plan
+
+Everything below is a deliberate departure from what the original plan (the phases above,
+and the mechanisms in the section before them) laid down, with the reason. Product behaviour
+is settled in [`aim.md`](aim.md) §Product; where the build departs from *that*, it says so here
+and this file wins.
 
 ### Infrastructure moved to separate repositories
 
-`plan.md` §4 puts `compose.yaml`, `compose.replicas.yaml`, `compose.observability.yaml` and
+The plan put `compose.yaml`, `compose.replicas.yaml`, `compose.observability.yaml` and
 `infra/` in this repo. They are gone. Shared services now live in
 [`platform`](https://github.com/shipyardworks/platform) and
 [`observability`](https://github.com/shipyardworks/observability), because
 this stopped being the only app that will run on the box. This repo keeps
 `compose.platform.yaml`: three stateless replicas, the frontend container, and nothing else.
 
-**This knowingly gives up R7** (`aim.md` §2): a reviewer can no longer clone this repo alone and
+**This knowingly gives up R7** ([`aim.md`](aim.md) §2): a reviewer can no longer clone this repo alone and
 run it with one command. That was the owner's call, taken explicitly. The replacement is three
 repos and a documented order in the platform README.
 
-### The client became a Next.js app, not the single file `aim.md` called correct
+### The client became a Next.js app, not the single file the plan called correct
 
-`aim.md` §1.3 names "a deliberately plain single-page test client" as the correct trade for this
-project's aim, and `plan.md` §5 (Phase 7) specced `web/index.html`: one file, no build step, no
+[`aim.md`](aim.md) §1.3 named "a deliberately plain single-page test client" as the correct trade
+for this project's aim, and phase 7 specced `web/index.html`: one file, no build step, no
 framework. That client did its job through phase 7 and became the ceiling on how the product could look.
 The owner reversed the call explicitly: `web/` is now a Next.js app in its own container,
 proxied by the shared nginx at `/` with `/api` and `/ws` underneath it, so the browser sees one
@@ -106,7 +297,7 @@ what is on screen is what will be created.
 
 ### Reactions and deletes bypass Redpanda by design
 
-`plan.md` does not cover message interactions; they were added afterward, and deliberately do
+The plan does not cover message interactions; they were added afterward, and deliberately do
 not go through the log. The write-ahead log exists for things that need a position in the
 conversation, a sequence number, and exactly one writer. A reaction has no position, and a
 deletion edits a row that already has one — routing either through a topic partitioned by
@@ -128,32 +319,32 @@ at all until this change. The guarantee is unchanged; only the names move.
 
 ### `friend_requests.status` gained `declined`
 
-`plan.md` §2.2 allowed `pending` / `accepted` / `expired`. That conflates "nobody replied" with
+The planned schema allowed `pending` / `accepted` / `expired`. That conflates "nobody replied" with
 "someone said no", and the purge rule has to tell them apart. Added in migration `V5`.
 
 ### The descending index on `(conversation_id, seq)` was not created
 
-`plan.md` §2.2 lists both a unique constraint and a descending index. A btree scans backwards as
+The planned schema listed both a unique constraint and a descending index. A btree scans backwards as
 cheaply as forwards, so the second would duplicate the first's index at the cost of an extra
 write per message.
 
 ### `/api/health` is liveness; readiness is a separate endpoint
 
-`plan.md` §5 asks only for a health endpoint. One endpoint doing both was actively harmful: under
+The plan asked only for a health endpoint. One endpoint doing both was actively harmful: under
 chaos-run load the container probe timed out on dependency checks and declared a healthy node
 dead. Liveness now performs no I/O. Readiness checks Postgres and Redis, and deliberately not
 Kafka or Elasticsearch — a broker or search blip must not take every replica out of rotation.
 
 ### The writer never drops a record
 
-`plan.md` does not specify error handling for the consumer. Spring Kafka's default retries ten
+The plan does not specify error handling for the consumer. Spring Kafka's default retries ten
 times and then **skips the record** — silent message loss under database pressure, in the one
 system whose central claim is that nothing is lost. The writer now retries indefinitely, so a
 persistent failure stalls that partition instead.
 
 ### A new match ends the stranger conversation it replaces
 
-`pre-plan.md` §3 says a conversation is with one person at a time, and nothing enforced it: every
+[`aim.md`](aim.md) Product §3 says a conversation is with one person at a time, and nothing enforced it: every
 match left the previous one `active`, so the chat list filled with threads that still took
 messages, and one side could keep typing into a conversation the other had long since moved on
 from. `ConversationService#createMatched` (matching and invite links both go through it) now ends
@@ -165,7 +356,7 @@ Migration `V10` applies the same rule to conversations already stuck open: an ac
 conversation ends if either of its people has a newer conversation. It changes `state` and
 `ended_at` only; nothing is deleted.
 
-Opening a friend does **not** end a live stranger conversation, although `pre-plan.md` §3 says it
+Opening a friend does **not** end a live stranger conversation, although Product §3 says it
 should. That rule was not asked for here, and ending someone's conversation because a row in the
 sidebar was clicked is not a change to make in passing.
 
@@ -178,7 +369,7 @@ the purple-to-cyan gradient on the save prompt were exactly what that rule exist
 
 ### The phone shell: one drawer control, and a header that gets out of the way
 
-`pre-plan.md` settles behaviour, not layout, so none of this contradicts it -- but it is a
+Product §3 settles behaviour, not layout, so none of this contradicts it -- but it is a
 visible departure from what the client did before, and the reasoning is worth keeping.
 
 A conversation now owns the whole phone screen. The app header stays hidden while a chat is
@@ -206,7 +397,7 @@ the right edge of it.
 
 ### The socket reconnects, and says so when it has not
 
-`plan.md` 3 specifies the websocket protocol and says nothing about the connection's own
+The plan specifies the websocket protocol and says nothing about the connection's own
 lifecycle, which is how a client that opened exactly one socket and never opened another passed
 review for eight phases. Everything real-time in this product rides on that one connection; a
 browser closes it for reasons that have nothing to do with the app, and `send()` on a closed
@@ -235,16 +426,16 @@ its ending, still offers it.
 
 ### Images are kept for thirty days, anonymous or not
 
-`pre-plan.md` 5 point 4 sets two tiers: 24 hours without an account, 30 days with one, and says
+[`aim.md`](aim.md) Product §5 point 4 sets two tiers: 24 hours without an account, 30 days with one, and says
 plainly that the difference is a real storage bill rather than an invented restriction. The
 reasoning holds and the bill does not exist yet -- nothing here is open to the public, and an
 image vanishing overnight costs the owner more today than the bytes do. Both tiers are 30 days,
 on the owner's instruction.
 
 Both are `${SHUSH_MEDIA_RETENTION_ANONYMOUS}` / `${SHUSH_MEDIA_RETENTION_SAVED}` rather than
-literals, so putting `pre-plan.md`'s rule back is an environment variable and a restart, not an
-edit and a rebuild. `pre-plan.md` itself is unchanged: it is the settled product, and this is
-the record of what was built instead.
+literals, so putting the two-tier rule back is an environment variable and a restart, not an
+edit and a rebuild. Product §5 is left as written: it is the settled product, and this is the
+record of what was built instead.
 
 The setting alone would not have done it. `expires_at` is stamped onto the row when the image is
 uploaded, so the setting only ever governs the *next* upload -- every image already in the
@@ -259,7 +450,7 @@ sweep in this system that deletes a person's content on a timer.
 
 ### `docs/SCHEMA.md` is generated
 
-Anticipated by `plan.md` §2.1 and now real: written by `SchemaDocIT` on every `./mvnw verify`,
+Anticipated by the plan and now real: written by `SchemaDocIT` on every `./mvnw verify`,
 by reading a real Postgres after every migration has run. It cannot drift, because it is not
 maintained — it is asked.
 
@@ -330,7 +521,7 @@ a pool nobody is in.
 
 **One thing reported as a bug this round was not one.** Images sent yesterday were gone today.
 They were deleted on purpose: in a conversation where neither person had saved an account, media
-was kept for 24 hours (`pre-plan.md` 5 point 4), and `purged 2 media object(s)` is in the
+was kept for 24 hours (Product §5 point 4), and `purged 2 media object(s)` is in the
 scheduler's log at the hour it happened. What was wrong was only what the app said about it --
 "Photo unavailable", which reads as breakage. An expired image now says "Photo expired": the box
 asks the API once, after a failure, and `unknown_media` (404) is the object having been reaped
@@ -367,7 +558,6 @@ Four of these are worth separating out, because the tests that "covered" them pa
   catch a scalability property that has silently stopped being exercised.
 
 ---
-
 ## Where the code lives
 
 ```
@@ -382,9 +572,10 @@ api/src/main/java/site/syamdev/shush/
   social/        friend requests, friendships (with unfriending), blocks, reports, invites
   media/         presigned upload, HEAD confirmation
   scheduler/     five retention jobs behind a Redis lock
-  cors/          allowed-origin table, re-read every 15s; decides HTTP CORS and the websocket handshake
+  cors/          allowed-origin table, re-read every 15s; decides HTTP CORS and the handshake
   common/        AfterCommit — run an action after the surrounding transaction, or now if there isn't one
   config/        security, Kafka, Redis, storage, node identity
+  resources/db/migration/   Flyway, forward-only, V1..V11
 
 web/
   theme/         tokens.css (every colour) and components.css (the shared controls)
@@ -392,8 +583,26 @@ web/
   components/    Sidebar, ChatPanel, MessageBubble, message actions, attachment preview,
                  camera capture, emoji picker, requests menu, theme toggle
   lib/           useShush — the websocket client and all client-side state
-  tests/         Playwright: journey, session, layout, interactions
+  tests/         Playwright: journey, session, layout, interactions, connection
+
+bench/           the invariant harness: load generator + assertions + its own tests
+compose.platform.yaml   three api replicas and the web container. No infrastructure
 ```
 
-`bench/` is a standalone harness sharing **no code** with `api/`, so a bug in a shared helper
-cannot cancel itself out across both sides.
+`bench/` shares **no code** with `api/`, so a bug in a shared helper cannot cancel itself out
+across both sides. It speaks only the public HTTP and WebSocket protocol.
+
+Infrastructure is in the sibling `platform` repo (postgres, minio, redis-shush, redpanda,
+elasticsearch, nginx) and `observability` (prometheus, grafana). See [`README.md`](README.md)
+for the topology and [`deploy.md`](deploy.md) for the commands.
+
+## Code conventions
+
+- Java 21, records for DTOs, sealed interfaces for frame types, **no Lombok**.
+- Constructor injection only, never field injection.
+- **Package by feature, not by layer** — the tree above.
+- All configuration through `application.yml` with env overrides. No secrets in the repo.
+- Structured logging; never log message bodies, tokens, emails or media keys.
+- Metrics: counters per message produced/consumed/fanned-out, a timer for end-to-end latency,
+  a gauge for open connections. Prometheus discovers replicas from Docker labels.
+- Dependency versions pinned exactly — no ranges, no `LATEST`.

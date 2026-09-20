@@ -318,7 +318,7 @@ kill lands mid-flight; it is an offered rate, not a ceiling.
 **They are evidence that the invariants hold, not a throughput claim.** A credible throughput number
 needs dedicated hardware with the load generator on a separate instance in the same availability
 zone — otherwise you are measuring the load generator. That run is documented in
-[`docs/deploy.md`](docs/deploy.md) §3 and has not been performed yet; the headline figure will be
+[`docs/deploy.md`](docs/deploy.md) §11 and has not been performed yet; the headline figure will be
 filled in from it, and nothing in this table will be restated as one.
 
 ---
@@ -543,11 +543,11 @@ knows nothing about this one.
 
 | File | What it settles |
 | ---- | --------------- |
-| `docs/aim.md` | Why the project exists; locked technical decisions with rationale |
-| `docs/pre-plan.md` | Every product behaviour, in plain English |
-| `docs/plan.md` | Data model, mechanisms, phases, exit criteria |
-| `docs/deploy.md` | Hosting, cost, benchmark procedure, nginx changes |
-| `docs/implementation.md` | **What was actually built**, and every divergence from the plan |
+| `docs/README.md` | The map: the three repositories, architecture, invariants, working rules |
+| `docs/aim.md` | Why the project exists; locked decisions with rationale; every product behaviour |
+| `docs/implementation.md` | **What was actually built**: mechanisms, data model, divergences, every bug found |
+| `docs/deploy.md` | The live box and the commands that deploy to it |
+| `docs/SCHEMA.md` | The schema, generated from a real Postgres on every `./mvnw verify` |
 | `bench/results/` | Raw harness output, hardware, and how to reproduce it |
 
 ### The frontend
@@ -618,7 +618,7 @@ on" is a fact about a screen you looked at, not something worth a round trip to 
 `PUT /api/interests/mine` still exists and still runs on every `find`, because matching still
 needs the ids on the server; only where the *pre-selection* comes from moved.
 
-**History of everything, strangers included.** `pre-plan.md` says a stranger conversation
+**History of everything, strangers included.** `aim.md` Product §3 says a stranger conversation
 nobody asked to keep does not survive its ending, and the retention job deleted it an hour
 later. The owner asked for a history list covering every conversation, so the purge now only
 reaps conversations with no messages in them — a matched pair who never spoke. The cost that
@@ -641,7 +641,7 @@ strings would make a reaction a way to put anything into someone else's message 
 position in the conversation and a deletion edits a row that already has one. They are ordinary
 writes; the fanout still goes through Redis, so the single delivery path is untouched.
 
-**Removing a friend.** `pre-plan.md` says how you keep somebody and never how you stop. Left
+**Removing a friend.** `aim.md` Product §3 says how you keep somebody and never how you stop. Left
 alone that is a dead end rather than an omission: matching skips anyone you are already friends
 with, so once two accounts had kept each other neither could ever be matched again — correct
 behaviour, with no way out of it. `DELETE /api/friends/{userId}` removes the friendship and
@@ -651,7 +651,7 @@ dialog rather than on the friends list, where it would be one stray click from p
 
 **Changing your name.** Shuffling used to sit on the screen you pass through before every
 match, which made a new identity a single click away from anyone who had just been unpleasant
-under the old one — and `pre-plan.md` step 9 says a returning visitor gets the flow *minus the
+under the old one — and `aim.md` Product §3 says a returning visitor gets the flow *minus the
 name step* anyway. It moved into the profile dialog. Nothing rate-limits it beyond the existing
 throttle, so this narrows the invitation rather than closing it.
 
@@ -690,7 +690,7 @@ dimming goes. A dimmed control should mean the app is refusing; this one is repo
 one thing a full-size viewer has already done. Saving it is the long press every phone offers,
 and that works whether or not a link is drawn next to it.
 
-**Images are kept for thirty days whether or not anyone has an account.** `pre-plan.md` 5 point
+**Images are kept for thirty days whether or not anyone has an account.** `aim.md` Product §5 point
 4 sets two tiers -- 24 hours anonymous, 30 days with an account -- and is right that the
 difference is a real storage bill rather than an invented restriction. There is no such bill
 yet: nothing here is open to the public, and a photo vanishing overnight costs more today than
@@ -746,14 +746,14 @@ gone wrong.
   neither an operator nor the harness could tell a multi-node run from a single-node one.
 - **`GET /api/media/**` returns a 302 to a presigned URL** and authorises on conversation membership
   rather than on possession of the key.
-- **`PUT /api/interests/mine` records a selection.** `pre-plan.md` settles the behaviour but names
+- **`PUT /api/interests/mine` records a selection.** `aim.md` Product §4 settles the behaviour but names
   no endpoint.
 - **Conversations were created by a flag-guarded dev endpoint** before matching existed; it remains,
   off by default, because the harness needs it.
 
 **Data model**
 
-- **`friend_requests.status` gained a `declined` value** (`V5`). `plan.md` §2.2 allowed only
+- **`friend_requests.status` gained a `declined` value** (`V5`). The planned schema allowed only
   `pending`/`accepted`/`expired`, which conflates "nobody replied" with "someone said no", and the
   purge rule needs to tell them apart.
 - **A declined request means the conversation is not kept** and goes back on the purge clock.
@@ -764,16 +764,19 @@ gone wrong.
 
 **Client**
 
-- **`web/index.html` is copied into the jar at build time** and served by the API, so there is one
-  source of truth and the image is self-contained. The Docker build context is the repository root.
+- **The client is its own container, not a file in the jar.** It was `web/index.html`, copied into
+  the jar at build time and served by the API, until the frontend became a Next.js app; nginx now
+  serves it at `/` and proxies `/api` and `/ws`, so the browser still sees one origin.
 - **The client generates `clientMsgId` with a `crypto.getRandomValues` fallback.**
   `crypto.randomUUID` exists only in a secure context, so on any plain-HTTP deployment that is not
   localhost it is undefined and every send throws.
 
 **Testing**
 
-- **Selenium in a container, not Playwright**, so the browser journey runs inside `./mvnw verify`
-  with no Node toolchain to install.
+- **The browser journey is Playwright in `web/`, not Selenium in `./mvnw verify`.** It was
+  Selenium in a container, so the journey ran inside the Java build with no Node toolchain to
+  install; that went with the single-file client it drove. The trade is stated in §8 — Playwright
+  covers the same ground but only against a stack that is already up.
 - **TTLs are shortened in tests** (presence, typing, shuffle) so expiry is something a test observes
   rather than assumes. The behaviour under test is that these keys expire on their own, not the
   exact duration.
