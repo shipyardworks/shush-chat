@@ -498,7 +498,13 @@ The browser journey moved to Playwright in `web/` when the frontend became its o
 That is a real trade: `./mvnw verify` used to drive the client end to end because the client was
 a single HTML file the API served itself, and it no longer can. `npm test` covers the same
 journey — matching, both directions, images that actually load, requests visible to the
-recipient, unread counts, ticks — but only against a stack that is already up.
+recipient, unread counts, ticks — but only against a stack that is already up. It also covers
+the connection itself: `tests/connection.spec.ts` severs a live websocket and asserts the app
+reconnects, re-sends the search it was running and delivers what was pressed while it was down.
+
+**The browser has to match the Playwright version.** `npx playwright install chromium` after any
+bump — the installed build is pinned to the package, and a stale one fails every test with
+`Executable doesn't exist` before a single assertion runs.
 
 **Stop the platform stacks first on a small machine.** The suite starts six containers of its
 own, one of which is Chrome, and needs roughly 3 GB. With the platform's twelve already running
@@ -654,6 +660,41 @@ two in colour mean the other person's read cursor has passed it. That is the Wha
 vocabulary mapped onto acks and cursors the server already had, rather than new state. A client
 only acknowledges a read while the conversation is actually on screen — acknowledging from a
 hidden view would both lie to the sender and zero your own unread count.
+
+**The live socket reconnects, and the app says when it has not.** Everything real-time here
+rides on one websocket, and browsers close one for reasons the app has no say in -- a phone
+locked, a move from wifi to mobile data, a replica restarting. It used to be opened once at
+sign-in and never again, and `WebSocket.send()` on a closed socket throws nothing and delivers
+nothing, so from the first disconnect every frame went into the floor while the screen looked
+entirely normal. It now reconnects with a capped backoff and on `visibilitychange`/`online`,
+queues anything written while it is down, re-sends a search that is still on screen (a
+disconnected user is dropped from the server's wait pool, so reconnecting alone is not enough),
+and renders a "Reconnecting…" pill the whole time it is not up. That last part is the important
+one: the cost of this was almost all in nothing saying anything was wrong
+(`docs/implementation.md`, bug 42).
+
+**"Find someone" is not in the sidebar.** It sat above both tabs whether either had anything in
+it, on the list of people you have already talked to -- which is a list of what happened, not a
+place to start something new. The logo goes to the start screen and an ended conversation
+already offers its own. One consequence is worth stating rather than hiding: on a phone, with a
+conversation open and the drawer over it, the app header is deliberately hidden, so from inside
+that drawer there is now no route to the start screen. Leaving the conversation, or its ending,
+still offers one.
+
+**A request already sent is a tick, not a greyed-out plus.** The button has always been disabled
+after the first ask. On a phone the words are not on screen to say so, and a dimmed plus reads
+as "not available" rather than "you already did this" -- so the icon changes instead, and the
+dimming goes. A dimmed control should mean the app is refusing; this one is reporting.
+
+**The image viewer offers only close.** "Open" put the same photo in a second tab, which is the
+one thing a full-size viewer has already done. Saving it is the long press every phone offers,
+and that works whether or not a link is drawn next to it.
+
+**An expired photo says "expired", not "unavailable".** Images in a conversation where nobody has
+saved an account are deleted after 24 hours, on purpose. "Photo unavailable" over a deliberate
+expiry reads as the app being broken -- it was reported as exactly that. The box asks the API
+once, only after a load has failed, and a 404 (`unknown_media`) means the object has been
+reaped rather than anything having gone wrong.
 
 **Infrastructure and running it**
 
