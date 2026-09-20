@@ -211,14 +211,13 @@ export const SetupPanel = ({
   onFind,
   onCancelFind,
   bare = false,
-  onBack,
 }: {
   interests: { suggested: Interest[]; all: Interest[] };
   selected: number[];
   setSelected: (next: number[]) => void;
-  /** Kept in this browser only -- never sent anywhere, never part of the streaming strip. */
+  /** Typed tags: real shared rows, just not ones the catalogue offers for browsing. */
   customInterests: Interest[];
-  onAddInterest: (label: string) => void;
+  onAddInterest: (label: string) => void | Promise<void>;
   onRemoveInterest: (id: number) => void;
   patience: number;
   setPatience: (next: number) => void;
@@ -229,8 +228,6 @@ export const SetupPanel = ({
   onCancelFind: () => void;
   /** Dropped into an existing surface rather than centred on its own screen. */
   bare?: boolean;
-  /** Phone only, and only when not bare: returns to the sidebar list. */
-  onBack?: () => void;
 }) => {
   const [draft, setDraft] = useState("");
 
@@ -291,10 +288,20 @@ export const SetupPanel = ({
               id="addInterestInput"
               type="text"
               autoComplete="off"
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
               placeholder="Add interest"
               maxLength={40}
               value={draft}
-              onChange={(event) => setDraft(event.target.value)}
+              /* Lowercased as it is typed, rather than quietly on the way out. The server
+                 already dedupes "Hari" and "hari" to one row by slug, so the two spellings
+                 always did mean one interest -- but the tile then came back reading
+                 differently from what was typed, or matching a tile the screen showed with a
+                 capital. Showing the real thing while it is being typed is the honest half of
+                 that dedupe. A phone also defaults to a capital on the first letter, which
+                 nobody asked for on a tag. */
+              onChange={(event) => setDraft(event.target.value.toLowerCase())}
               onKeyDown={(event) => {
                 if (event.key === "Enter") submitDraft();
               }}
@@ -358,23 +365,16 @@ export const SetupPanel = ({
   ) : (
     // grid-cols-1 is minmax(0, 1fr): an auto column would grow to the strip's whole scroll width,
     // and the panel would run off a phone screen with it.
-    <div className="grid min-h-0 flex-1 grid-cols-1 place-items-start overflow-y-auto p-3.5 sm:place-items-center sm:p-6">
-      <div className="panel w-full max-w-[620px] p-4 sm:p-7">
-        {onBack && (
-          <button
-            id="setupBack"
-            type="button"
-            aria-label="Back to chats"
-            onClick={onBack}
-            className="btn-ghost -ml-1.5 mb-3 grid h-9 w-9 place-items-center rounded-full p-0 sm:hidden"
-          >
-            <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M15 18l-6-6 6-6" />
-            </svg>
-          </button>
-        )}
-        {body}
-      </div>
+    //
+    // `safe center` and not plain centring: the panel is centred in the empty screen it used to
+    // sit at the top of, but once the keyboard is up it is taller than what is left, and plain
+    // centring pushes the first row off the top edge where nothing can scroll back to it. `safe`
+    // falls back to start-aligned exactly in that case.
+    <div
+      className="grid min-h-0 flex-1 grid-cols-1 overflow-y-auto p-3.5 sm:p-6"
+      style={{ placeItems: "safe center" }}
+    >
+      <div className="panel w-full max-w-[620px] p-4 sm:p-7">{body}</div>
     </div>
   );
 };

@@ -50,6 +50,16 @@ export const api = {
   saveInterests: (interestIds: number[]) =>
     request("/api/interests/mine", { method: "PUT", body: JSON.stringify({ interestIds }) }),
 
+  /**
+   * Finds the shared row for a typed tag, or creates it, and hands back the real one.
+   *
+   * <p>The server dedupes by slug, so two people typing the same word in different case get
+   * the same id -- which is the entire point. A tag that stays in one browser cannot overlap
+   * with anything and so cannot match anyone, by construction.
+   */
+  createInterest: (label: string) =>
+    json<Interest>("/api/interests", { method: "POST", body: JSON.stringify({ label }) }),
+
   shuffleName: () => request("/api/me/shuffle-name", { method: "POST" }),
 
   friends: () => json<Friend[]>("/api/friends"),

@@ -10,6 +10,27 @@
    page never sets it, so the dvh fallback is what they get. */
 html, body { height: 100%; height: 100dvh; height: var(--app-height, 100dvh); }
 
+/*
+  The page is exactly as wide as the screen, and cannot be dragged sideways to reveal more.
+
+  Two ways it got dragged anyway. Anything wider than the viewport -- one unbroken word, a row
+  that will not shrink -- makes the whole document a horizontally scrollable canvas. And the
+  interest strip scrolls sideways on purpose, so a swipe carried past its end chains to the
+  page behind it, which is what `overscroll-behavior-x` stops. Either way it reads as the
+  layout being the wrong size: the header slides off to the left, the send button sits
+  somewhere past the right edge, and nothing on screen explains why.
+
+  The clip is a backstop, not a licence. Anything that actually overflows is still a bug, and
+  layout.spec.ts looks for it element by element rather than trusting `scrollWidth` -- which
+  this rule clamps, and which would therefore report a tidy page no matter what.
+*/
+html, body {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
+  overscroll-behavior-x: none;
+}
+
 body {
   margin: 0;
   color: var(--color-body);

@@ -117,3 +117,36 @@
 @media (prefers-reduced-motion: reduce) {
   .find-pulse::after { animation: none; }
 }
+
+/*
+  The chat's name bar, which slides shut on a phone while the conversation is scrolled down.
+
+  A grid whose single row goes 1fr -> 0fr, rather than a max-height guess: the row collapses to
+  exactly the height of what is in it, whatever that turns out to be, and animates because
+  grid-template-rows is animatable where `height: auto` is not. The inner wrapper must clip, or
+  the content keeps its own height and nothing appears to close.
+
+  The breakpoint lives here and not in the component: sm and up has room for a header and never
+  collapses it, and that is a fact about the layout rather than about scrolling.
+*/
+.chat-head {
+  display: grid;
+  grid-template-rows: 1fr;
+}
+.chat-head > * {
+  min-height: 0;
+  overflow: hidden;
+}
+
+@media (max-width: 639px) {
+  .chat-head {
+    transition: grid-template-rows 0.22s ease;
+  }
+  .chat-head[data-collapsed="true"] {
+    grid-template-rows: 0fr;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-head { transition: none; }
+}

@@ -169,7 +169,17 @@ test("a photo opens full size", async ({ browser }) => {
   await expect(bob.locator("#imageViewer")).toHaveCount(0);
 });
 
-test("a custom tag stays in this browser -- normalised, never shared, gone when removed", async ({
+/**
+ * A typed tag is a real shared row -- and still nobody else's clutter.
+ *
+ * <p>It used to be neither: kept in this browser under a negative id that was stripped out
+ * before any request, so it could never match anyone. It is created on the server now, which
+ * is what lets two people who typed the same word be paired on it
+ * (setup.spec.ts, "two people who type the same interest are matched on it"). What has not
+ * changed is that it is not *offered* to anyone: nothing typed is put into the catalogue
+ * others browse, so Bob's screen is exactly as it was.
+ */
+test("a typed tag is shared enough to match on, and still not on anybody else's screen", async ({
   browser,
 }) => {
   const alice = await arrive(browser);
@@ -184,7 +194,8 @@ test("a custom tag stays in this browser -- normalised, never shared, gone when 
   await expect(aliceTile).toBeVisible();
   await expect(aliceTile).toHaveAttribute("aria-pressed", "true");
 
-  // Bob never typed it and nothing sent it to him -- it does not exist on his screen at all.
+  // Bob never typed it, so it is not on his screen: a tag somebody invented is matchable, not
+  // promoted into the list of things to pick from.
   await expect(bob.locator("[data-testid=interest]", { hasText: normalised })).toHaveCount(0);
 
   // This browser remembers it...
@@ -192,7 +203,8 @@ test("a custom tag stays in this browser -- normalised, never shared, gone when 
   await expect(alice.locator("[data-testid=interest]").first()).toBeVisible();
   await expect(alice.locator("[data-testid=interest]", { hasText: normalised })).toBeVisible();
 
-  // ...until it is removed, which is the only way a tag with nowhere else to live goes away.
+  // ...until it is removed from this browser's list, which is the only way it leaves the
+  // screen -- the row itself stays, because somebody else may be matching on it right now.
   await alice.locator("[data-testid=interest]", { hasText: normalised }).click({ force: true });
   await expect(alice.locator("[data-testid=interest]", { hasText: normalised })).toHaveCount(0);
   await alice.reload();

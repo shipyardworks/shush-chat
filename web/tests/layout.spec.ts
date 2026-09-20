@@ -1,11 +1,59 @@
-import { expect, test, type Browser, type Page } from "@playwright/test";
-import { readFileSync } from "fs";
+import { devices, expect, test, type Browser, type Page } from "@playwright/test";
+import { crc32, deflateSync } from "zlib";
 
-const SHAPES = "/tmp/claude-1000/-home-syam-dev-shush-chat/f1bdcb88-be1c-4dd2-bb2b-dcc1436d3936/scratchpad";
+/**
+ * The four aspect ratios, drawn here rather than read off disk.
+ *
+ * <p>These used to be `readFileSync` against an absolute path under /tmp belonging to the
+ * machine they were first written on. The files were never in the repository, so every one of
+ * these eight tests failed with ENOENT anywhere else -- including on the next clone of this
+ * one. A fixture a test cannot run without belongs either in the repo or in the test; a
+ * generated one needs no bytes committed and cannot go missing.
+ *
+ * <p>What matters to these assertions is the shape, not the picture: a tall image must not
+ * push through its caption, a wide one must not run off the side. So it is one flat colour,
+ * and the size is the whole point of each.
+ */
+const SHAPES: Record<string, [number, number]> = {
+  "tall.png": [240, 1400],
+  "wide.png": [1600, 260],
+  "square.png": [900, 900],
+  "small.png": [24, 24],
+};
+
+/** A minimal, valid PNG: one IHDR, one IDAT of opaque mid-grey, one IEND. */
+const png = (width: number, height: number): Buffer => {
+  const chunk = (type: string, body: Buffer) => {
+    const typed = Buffer.concat([Buffer.from(type, "ascii"), body]);
+    const length = Buffer.alloc(4);
+    length.writeUInt32BE(body.length);
+    const checksum = Buffer.alloc(4);
+    checksum.writeUInt32BE(crc32(typed) >>> 0);
+    return Buffer.concat([length, typed, checksum]);
+  };
+
+  const header = Buffer.alloc(13);
+  header.writeUInt32BE(width, 0);
+  header.writeUInt32BE(height, 4);
+  header[8] = 8; // bit depth
+  header[9] = 2; // colour type: truecolour, no alpha
+
+  // Each scanline is a one-byte filter marker (0, none) then RGB per pixel.
+  const row = Buffer.concat([Buffer.from([0]), Buffer.alloc(width * 3, 0x60)]);
+  const raw = Buffer.concat(Array.from({ length: height }, () => row));
+
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    chunk("IHDR", header),
+    chunk("IDAT", deflateSync(raw)),
+    chunk("IEND", Buffer.alloc(0)),
+  ]);
+};
+
 const shape = (name: string) => ({
   name,
   mimeType: "image/png",
-  buffer: readFileSync(`${SHAPES}/${name}`),
+  buffer: png(...SHAPES[name]),
 });
 
 const arrive = async (browser: Browser): Promise<Page> => {
@@ -224,4 +272,256 @@ test("the camera button opens a camera, not a file picker", async ({ browser }) 
   await expect(page.locator("#attachmentPreview")).toBeVisible();
   await page.locator("#sendAttachment").click();
   await expect(other.locator("#messages img")).toBeVisible();
+});
+
+/* ---------------------------------------------------------------------------
+   The phone shell. Everything below runs at iPhone width, because every one of
+   these was a bug that only existed there.
+   --------------------------------------------------------------------------- */
+
+const arriveOnPhone = async (browser: Browser): Promise<Page> => {
+  const page = await (await browser.newContext({ ...devices["iPhone 13"] })).newPage();
+  await page.goto("/");
+  await page.getByRole("link", { name: "Start chatting" }).click();
+  await expect(page.locator("#displayName")).toBeVisible();
+  return page;
+};
+
+const widerThanTheScreen = (page: Page) =>
+  page.evaluate(() => {
+    const width = document.documentElement.clientWidth;
+    /**
+     * Inside something that scrolls sideways on purpose, being wider than the screen is the
+     * feature -- the interest strip is a row of tiles far wider than any phone. What matters
+     * is whether anything widens the *page*, so an element with a scrolling ancestor is not a
+     * culprit however far past the edge it sits.
+     */
+    const contained = (node: HTMLElement) => {
+      // Stops at body: the page-level `overflow-x: hidden` is the backstop this is meant to
+      // check is unnecessary, so counting it as containment would make the check vacuous --
+      // every element on the page is inside body, and nothing could ever be reported.
+      for (let at = node.parentElement; at && at !== document.body; at = at.parentElement) {
+        const overflow = getComputedStyle(at).overflowX;
+        if (overflow === "auto" || overflow === "scroll" || overflow === "hidden") return true;
+      }
+      return false;
+    };
+    return {
+      scrollWidth: document.documentElement.scrollWidth,
+      clientWidth: width,
+      /** Named rather than counted, so a failure says which element to go and look at. */
+      culprits: [...document.querySelectorAll<HTMLElement>("body *")]
+        .filter((node) => node.getBoundingClientRect().right > width + 1 && !contained(node))
+        .slice(0, 5)
+        .map((node) => `${node.tagName.toLowerCase()}#${node.id || "-"}.${node.className || "-"}`),
+    };
+  });
+
+/**
+ * The page is the width of the phone and cannot be dragged sideways.
+ *
+ * Something wider than the viewport turned the whole document into a horizontally scrollable
+ * canvas: the header slid off to the left and the send button sat past the right edge, with
+ * nothing on screen to explain it. `overflow-x: hidden` is the backstop; this is the check
+ * that nothing is relying on it.
+ */
+test("nothing on a phone is wider than the phone", async ({ browser }) => {
+  const alice = await arriveOnPhone(browser);
+  const bob = await arriveOnPhone(browser);
+
+  // Only the named list is meaningful: `document.scrollWidth` is clamped by the page-level
+  // clip, so it reads as fitting whether or not anything inside actually does.
+  // This check is only worth its green if it can go red, and the page-level clip is exactly
+  // the kind of thing that quietly stops it being able to. Prove it on something that really
+  // does stick out, then take it away again.
+  await alice.evaluate(() => {
+    const canary = document.createElement("div");
+    canary.id = "overflowCanary";
+    canary.style.cssText = "width:3000px;height:4px";
+    document.body.append(canary);
+  });
+  expect(
+    (await widerThanTheScreen(alice)).culprits.join(),
+    "the check can see something that overflows",
+  ).toContain("overflowCanary");
+  await alice.evaluate(() => document.querySelector("#overflowCanary")!.remove());
+
+  const onSetup = await widerThanTheScreen(alice);
+  expect(onSetup.culprits, "nothing on the setup screen relies on the page clipping it").toEqual([]);
+
+  await matchThem(alice, bob);
+  await say(alice, "a message long enough to be worth wrapping in a bubble on a narrow screen");
+  // The classic way a chat page ends up wider than the screen: one token with nowhere to
+  // break. A link somebody pasted is the everyday version of this.
+  await say(alice, `https://example.com/${"a".repeat(180)}`);
+  await expect(alice.locator("[data-testid=message]").last()).toBeVisible();
+
+  const inChat = await widerThanTheScreen(alice);
+  expect(inChat.culprits, "nothing in a conversation relies on the page clipping it").toEqual([]);
+
+  // The one that gave it away: send was drawn off the right edge and could not be tapped.
+  const send = (await alice.locator("#send").boundingBox())!;
+  expect(send.x + send.width, "send is on screen").toBeLessThanOrEqual(inChat.clientWidth);
+  expect(send.x, "send is not off the left either").toBeGreaterThanOrEqual(0);
+});
+
+/** More room for the conversation: the name bar gets out of the way while you read. */
+test("the chat header scrolls away on a phone and comes back on the way up", async ({
+  browser,
+}) => {
+  const alice = await arriveOnPhone(browser);
+  const bob = await arriveOnPhone(browser);
+  await matchThem(alice, bob);
+
+  for (let i = 0; i < 14; i++) await say(alice, `line ${i}`);
+
+  const head = alice.locator(".chat-head");
+  // getBoundingClientRect, not boundingBox(): Playwright calls a zero-height element invisible
+  // and hands back null, which is the one measurement this test most needs to be able to take.
+  const height = () => head.evaluate((node) => node.getBoundingClientRect().height);
+
+  expect(await height(), "the header is there to begin with").toBeGreaterThan(0);
+
+  // A message arriving also scrolls this list, and in the same direction. It must not count:
+  // the header vanishing because the other person spoke is not the reader scrolling.
+  await say(bob, "and one from the other side");
+  await expect(alice.locator("[data-testid=message]").last()).toContainText("other side");
+  expect(await height(), "a new message is not someone scrolling").toBeGreaterThan(0);
+
+  // One move at a time, each waited out before the next. Two jumps issued back to back are
+  // coalesced into a single scroll event at the final position, and a test that depends on
+  // which way the browser felt like reporting that is a test that fails one run in five.
+  const messages = alice.locator("#messages");
+  const scrollTo = async (where: "top" | "bottom") => {
+    await messages.evaluate((node, to) => {
+      node.scrollTop = to === "top" ? 0 : node.scrollHeight;
+    }, where);
+    await expect
+      .poll(() =>
+        messages.evaluate((node, to) =>
+          to === "top" ? node.scrollTop < 1 : node.scrollHeight - node.scrollTop - node.clientHeight < 2,
+        where),
+      )
+      .toBe(true);
+    // Two frames, so the scroll event that jump produced has been dispatched and handled.
+    await alice.evaluate(
+      () => new Promise<void>((done) => requestAnimationFrame(() => requestAnimationFrame(() => done()))),
+    );
+  };
+
+  await scrollTo("top");
+  await scrollTo("bottom");
+  await expect(head).toHaveAttribute("data-collapsed", "true");
+  await expect.poll(height).toBeLessThan(2);
+
+  // ...and back the moment the reader goes the other way. A header that will not return is
+  // worse than one that never left.
+  await scrollTo("top");
+  await expect(head).toHaveAttribute("data-collapsed", "false");
+  await expect.poll(height).toBeGreaterThan(0);
+});
+
+/**
+ * One control, one meaning. The chat used to offer "<", which promised to leave the
+ * conversation and instead opened a drawer over it -- and opening that drawer brought the app
+ * header back, so the page appeared to change its header on the way in.
+ */
+test("a burger opens a full-height drawer, and the header does not change under it", async ({
+  browser,
+}) => {
+  const alice = await arriveOnPhone(browser);
+  const bob = await arriveOnPhone(browser);
+
+  // The setup screen offers the burger in the app header, and no back arrow of its own.
+  await expect(alice.locator("#openDrawer")).toBeVisible();
+  await expect(alice.locator("#setupBack")).toHaveCount(0);
+
+  await matchThem(alice, bob);
+
+  const header = alice.locator("header");
+  await expect(header, "a conversation owns the phone screen").toBeHidden();
+
+  await alice.locator("#chatBack").click();
+  const drawer = alice.locator("#sidebar");
+  await expect(drawer).toBeVisible();
+
+  // The whole height, from the very top -- not starting below a header that reappeared to
+  // make room for it.
+  const box = (await drawer.boundingBox())!;
+  expect(box.y, "the drawer starts at the top of the screen").toBeLessThanOrEqual(0);
+  expect(box.height).toBeGreaterThanOrEqual(alice.viewportSize()!.height - 1);
+  await expect(header, "and the header still has not come back").toBeHidden();
+});
+
+/** The message box takes the width; both attachment buttons live inside it. */
+test("the paperclip sits inside the message box, beside the camera", async ({ browser }) => {
+  const alice = await arriveOnPhone(browser);
+  const bob = await arriveOnPhone(browser);
+  await matchThem(alice, bob);
+
+  const box = (await alice.locator(".composer").boundingBox())!;
+  const attach = (await alice.locator("#attach").boundingBox())!;
+  const camera = (await alice.locator("#camera").boundingBox())!;
+
+  for (const [name, button] of [["paperclip", attach], ["camera", camera]] as const) {
+    expect(button.x, `${name} is inside the box`).toBeGreaterThanOrEqual(box.x - 1);
+    expect(button.x + button.width).toBeLessThanOrEqual(box.x + box.width + 1);
+  }
+  expect(attach.x, "paperclip is to the left of the camera").toBeLessThan(camera.x);
+
+  // Worth the move: the box is nearly the whole width now.
+  expect(box.width).toBeGreaterThan(alice.viewportSize()!.width * 0.7);
+});
+
+/** Asking to keep someone and being asked are two ends of one thing, so they look alike. */
+test("add friend is the same person icon the requests button uses", async ({ browser }) => {
+  const alice = await arriveOnPhone(browser);
+  const bob = await arriveOnPhone(browser);
+  await matchThem(alice, bob);
+
+  const person = await alice.locator("#requestsButton svg circle").getAttribute("r");
+  const addFriend = await alice.locator("#addFriend svg circle").getAttribute("r");
+  expect(addFriend, "drawn from the same person, not a bare plus").toBe(person);
+  // A plus alongside it, which is what makes it "add" rather than "someone".
+  expect(await alice.locator("#addFriend svg path").count()).toBeGreaterThan(1);
+});
+
+/**
+ * No empty band under the composer when the viewport changes size.
+ *
+ * <p>The shell is sized from `window.visualViewport`, because iOS Safari does not shrink
+ * `dvh` for the on-screen keyboard. iOS reports that viewport *during* the keyboard
+ * transition, and the bottom browser toolbar collapses on a different frame from the keyboard
+ * rising -- so a single reading taken mid-flight is short by about the toolbar's height and
+ * the shell keeps it. What that looked like was a strip of dead page between the message box
+ * and the keyboard, every time the box was tapped.
+ *
+ * <p>A headless browser has no keyboard to raise, so this drives the same handler the only
+ * other way it is ever driven -- the visible viewport changing height -- and asserts the thing
+ * that was actually wrong: the app stops short of the bottom of what can be seen.
+ */
+test("the shell fills the visible viewport after it changes size", async ({ browser }) => {
+  const alice = await arriveOnPhone(browser);
+  const bob = await arriveOnPhone(browser);
+  await matchThem(alice, bob);
+
+  const reachesTheBottom = async () =>
+    alice.evaluate(() => {
+      const seen = window.visualViewport?.height ?? window.innerHeight;
+      const declared = getComputedStyle(document.documentElement).getPropertyValue("--app-height");
+      const composer = document.querySelector("#composer")!.getBoundingClientRect();
+      return { seen, declared: parseFloat(declared), gapUnderComposer: seen - composer.bottom };
+    });
+
+  for (const height of [420, 560, 664]) {
+    await alice.setViewportSize({ width: 390, height });
+    await expect
+      .poll(async () => Math.abs((await reachesTheBottom()).declared - height) < 2)
+      .toBe(true);
+
+    const state = await reachesTheBottom();
+    expect(state.declared, `sized to what is visible at ${height}`).toBeCloseTo(state.seen, 0);
+    // The composer is the last thing in the shell, so anything below it is the dead band.
+    expect(state.gapUnderComposer, `no empty band under the composer at ${height}`).toBeLessThan(24);
+  }
 });
