@@ -13,7 +13,7 @@
 > **Generated — do not edit.** Change the schema by adding a migration under
 > `api/src/main/resources/db/migration/`, then run `cd api && ./mvnw verify`.
 
-Generated 2026-09-18 from 16 tables.
+Generated 2026-09-20 from 16 tables.
 
 ## Migrations applied
 
@@ -29,6 +29,7 @@ Generated 2026-09-18 from 16 tables.
 | `V8` | custom interests | yes |
 | `V9` | lowercase interest labels | yes |
 | `V10` | end superseded stranger conversations | yes |
+| `V11` | extend media retention | yes |
 
 ---
 

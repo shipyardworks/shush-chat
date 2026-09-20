@@ -18,7 +18,6 @@ export const Sidebar = ({
   hiddenOnPhone,
   onOpenFriend,
   onOpenConversation,
-  onFindSomeone,
   onLogout,
   onSaveAccount,
 }: {
@@ -33,7 +32,6 @@ export const Sidebar = ({
   hiddenOnPhone?: boolean;
   onOpenFriend: (friend: Friend) => void;
   onOpenConversation: (conversation: Conversation) => void;
-  onFindSomeone: () => void;
   onLogout: () => void;
   onSaveAccount: (email: string, password: string) => Promise<{ ok: boolean; message: string }>;
 }) => {
@@ -97,14 +95,6 @@ export const Sidebar = ({
           </button>
         </div>
 
-        <button
-          id="newChat"
-          type="button"
-          className="btn-primary mt-3 w-full"
-          onClick={onFindSomeone}
-        >
-          Find someone
-        </button>
       </div>
 
       {/* Only this scrolls. The tabs above and the account box below stay put -- a list that

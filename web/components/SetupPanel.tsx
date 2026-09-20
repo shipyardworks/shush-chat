@@ -211,6 +211,7 @@ export const SetupPanel = ({
   onFind,
   onCancelFind,
   bare = false,
+  onClose,
 }: {
   interests: { suggested: Interest[]; all: Interest[] };
   selected: number[];
@@ -228,6 +229,12 @@ export const SetupPanel = ({
   onCancelFind: () => void;
   /** Dropped into an existing surface rather than centred on its own screen. */
   bare?: boolean;
+  /**
+   * Given only when this panel is a dismissible modal. The close sits on the heading's own
+   * line rather than on a row of its own above it: an empty strip with one button in it costs
+   * a phone ~44px of the screen the picker is already short of, for nothing.
+   */
+  onClose?: () => void;
 }) => {
   const [draft, setDraft] = useState("");
 
@@ -267,7 +274,20 @@ export const SetupPanel = ({
   const body = (
     <>
       <div>
-        <h2 className="section-label">What are you into?</h2>
+        <div className="flex items-start justify-between gap-3">
+          <h2 className="section-label">What are you into?</h2>
+          {onClose && (
+            <button
+              id="closePicker"
+              type="button"
+              aria-label="Close"
+              className="btn-ghost -mt-1.5 grid h-8 w-8 flex-none place-items-center rounded-full p-0"
+              onClick={onClose}
+            >
+              ✕
+            </button>
+          )}
+        </div>
         {/*
           Chosen sits on top and never scrolls -- it is the answer, not the question, and it is
           short enough to just wrap. Everything still available streams underneath it, one line,

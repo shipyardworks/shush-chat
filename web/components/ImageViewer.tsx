@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
-import { mediaUrl } from "@/lib/api";
+
 import { ChatImage } from "./ChatImage";
 
 /**
@@ -24,6 +24,9 @@ export const ImageViewer = ({ mediaKey, onClose }: { mediaKey: string; onClose: 
       style={{ backgroundColor: "var(--color-scrim-strong)" }}
       onClick={onClose}
     >
+      {/* Close, and nothing else. "Open" put the same photo in a second tab -- the one thing
+          a viewer already opened does not need -- and the long press every phone offers for
+          saving an image works here regardless of whether we draw a link next to it. */}
       <div className="flex items-center gap-3 p-4">
         <button
           id="closeImageViewer"
@@ -34,17 +37,6 @@ export const ImageViewer = ({ mediaKey, onClose }: { mediaKey: string; onClose: 
         >
           ✕
         </button>
-        <span className="flex-1" />
-        {/* Opens the storage URL directly, so saving is the browser's job rather than ours. */}
-        <a
-          href={mediaUrl(mediaKey)}
-          target="_blank"
-          rel="noreferrer"
-          onClick={(event) => event.stopPropagation()}
-          className="btn-ghost px-3 text-sm no-underline"
-        >
-          Open
-        </a>
       </div>
       {/* flex with min-h-0 and overflow-hidden, not grid: a grid row is sized to its content,
           so max-h-full on the image resolved against a track the image had already stretched

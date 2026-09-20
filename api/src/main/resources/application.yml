@@ -160,8 +160,12 @@ shush:
     # and short enough that a leaked one is not an open write endpoint.
     upload-url-ttl: 5m
     max-bytes: 5242880
-    anonymous-retention: 24h
-    saved-retention: 30d
+    # Both configurable, and both 30 days by default while this is not open to the public.
+    # pre-plan.md 5 point 4 sets the anonymous window at 24h against a real storage bill; there
+    # is no such bill yet, and an image quietly vanishing overnight costs more right now than
+    # the bytes do. Put the two tiers back by setting the env var, not by editing this.
+    anonymous-retention: ${SHUSH_MEDIA_RETENTION_ANONYMOUS:30d}
+    saved-retention: ${SHUSH_MEDIA_RETENTION_SAVED:30d}
   retention:
     anonymous-user: 30d
     unconfirmed-media: 1h

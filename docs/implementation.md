@@ -37,9 +37,9 @@ presenting laptop figures as a headline number.
 
 | Suite | Count | Notes |
 | ----- | ----- | ----- |
-| Integration (`api`) | 187 | Real Postgres, Redis, Redpanda, Elasticsearch, MinIO via Testcontainers. Nothing mocked |
+| Integration (`api`) | 188 | Real Postgres, Redis, Redpanda, Elasticsearch, MinIO via Testcontainers. Nothing mocked |
 | Unit (`api`) | 9 | Pure logic only |
-| Browser (`web`, Playwright) | 51 | Journey, session, setup, layout and interactions specs, against a stack that is already running |
+| Browser (`web`, Playwright) | 72 | Journey, session, setup, layout, interactions and connection specs, against a stack that is already running |
 | Harness self-tests (`bench`) | 17 | Each invariant fed a violating stream, asserted to report it |
 | Isolation (`platform`) | 5 checks | Cross-tenant access attempted with real credentials |
 
@@ -204,6 +204,59 @@ typed. And `html, body` now clip horizontally: one element wider than the viewpo
 turning the whole page into a canvas that could be dragged sideways, with the send button off
 the right edge of it.
 
+### The socket reconnects, and says so when it has not
+
+`plan.md` 3 specifies the websocket protocol and says nothing about the connection's own
+lifecycle, which is how a client that opened exactly one socket and never opened another passed
+review for eight phases. Everything real-time in this product rides on that one connection; a
+browser closes it for reasons that have nothing to do with the app, and `send()` on a closed
+one is a silent no-op.
+
+So: reconnect with a capped backoff, plus `visibilitychange` and `online` as wake signals; queue
+anything written while it is down and flush it on the next open; re-send a live search on
+reconnect, because the server drops a disconnected user from the wait pool; and render
+`#reconnecting` whenever the socket is not up, because the cost of this bug was almost entirely
+that nothing on screen ever said anything was wrong. See bug 42.
+
+`tests/connection.spec.ts` covers it, and it severs a real socket rather than emulating offline
+-- `context.setOffline` leaves an established websocket open in Chromium, so a test written that
+way passes against the unfixed client. Severing the transport while leaving fetch alone is also
+the truer model: HTTP working perfectly while the socket is gone is exactly what hid this.
+
+### Find someone left the sidebar
+
+It sat above both tabs whether or not either had anything in them, on the list of people you
+have already talked to -- which is a list, not a place to start something new from. The start
+screen is a press away from the logo, and an ended conversation already offers its own Find
+someone. The cost is named in the README's Open Choices rather than hidden: on a phone, with a
+conversation open and the drawer over it, the app header is deliberately hidden, so the route to
+the start screen from inside the drawer is gone with the button. Leaving the conversation, or
+its ending, still offers it.
+
+### Images are kept for thirty days, anonymous or not
+
+`pre-plan.md` 5 point 4 sets two tiers: 24 hours without an account, 30 days with one, and says
+plainly that the difference is a real storage bill rather than an invented restriction. The
+reasoning holds and the bill does not exist yet -- nothing here is open to the public, and an
+image vanishing overnight costs the owner more today than the bytes do. Both tiers are 30 days,
+on the owner's instruction.
+
+Both are `${SHUSH_MEDIA_RETENTION_ANONYMOUS}` / `${SHUSH_MEDIA_RETENTION_SAVED}` rather than
+literals, so putting `pre-plan.md`'s rule back is an environment variable and a restart, not an
+edit and a rebuild. `pre-plan.md` itself is unchanged: it is the settled product, and this is
+the record of what was built instead.
+
+The setting alone would not have done it. `expires_at` is stamped onto the row when the image is
+uploaded, so the setting only ever governs the *next* upload -- every image already in the
+bucket keeps the deadline it was created with, and the sweep goes on honouring it. Migration
+`V11` restamps them, from `created_at` rather than `now()` so a picture sent three weeks ago
+does not get a fresh month, and only where the new window is longer so it can never shorten
+anything. Nothing already swept comes back; those bytes are gone.
+
+Guarded by `RetentionJobsIT#anImageInAnAnonymousConversationSurvivesTheNight`, because nothing
+guarded it before: the window was a number in a yaml file no test ever read, driving the one
+sweep in this system that deletes a person's content on a timer.
+
 ### `docs/SCHEMA.md` is generated
 
 Anticipated by `plan.md` §2.1 and now real: written by `SchemaDocIT` on every `./mvnw verify`,
@@ -259,6 +312,30 @@ Each was invisible to code review and would have shipped.
 | 39 | The swipe test released the strip mid-movement, which hands Chromium a velocity and it flings. What it then measured was the browser's momentum, not the app's hold-off -- it passed only when the machine was loaded enough not to fling, and failed six times out of six run on its own | running that one test by itself |
 | 40 | "You both like " with nothing after it: the matched-conversation subtitle resolved ids against the browsable catalogue, which deliberately excludes anything anyone typed | the new matching test asserting the interest is *named*, not just that a chat opened |
 | 41 | The check written for 3 could not fail. It looked for elements sticking out past the viewport and skipped any with a clipping ancestor -- and the `overflow-x: hidden` added to `body` in the same change made *every* element on the page have one, so the list was empty by construction | asking it to find a 3000px div, which it did not |
+| 42 | **The websocket was opened once and never reopened.** `WebSocket.send()` on a closed socket throws nothing and delivers nothing, so from the first disconnect onward every frame the app wrote -- `find`, `send`, `read`, `typing`, `leave` -- went into the floor, while the screen carried on looking exactly as it does when connected. HTTP kept working throughout, because fetch opens its own connection each time; that is what made it invisible, and what made it look like the matcher. Pressing Find wrote its `user_interests` row over HTTP and then sent the `find` frame nowhere, so the button spun on "Looking" against a server that had never heard of the search | the owner reporting that matching had stopped working at all, then the box: a selection written at 11:14:48 with no matching entry in either the Redis wait pool or the Elasticsearch index -- one half of one press landing and the other half missing |
+| 43 | The iOS long-press callout opened on top of the message menu. Holding a bubble is the app's own gesture; Safari's identical gesture selects the word under the finger and raises Copy \| Search with Google over it, and the app's menu is the one that gets dismissed | a phone screenshot, and now a test that reads `user-select` on the bubble and its text |
+
+**42 is the same shape as 11, 20, 21, 33 and 34, and the worst of them.** Every one of those was
+a silent refusal -- a request the system dropped with nothing anywhere saying so. This one was a
+silent refusal of *everything real-time at once*, for any session whose socket had ever closed:
+a phone locked for a minute, a switch from wifi to mobile data, a replica restarting under a
+deploy. The fix is in three parts, and the third is the one that matters most. The socket
+reconnects with a capped backoff, and on `visibilitychange` and `online` rather than only on a
+timer. Anything written while it is down is queued and flushed on the next open, instead of
+being handed to a socket that will swallow it. And the app now *says* it is disconnected, which
+is the part that would have turned four days of "matching is broken" into one look at the
+screen. A reconnect also re-sends a search that is still on screen, because the server drops a
+disconnected user from the wait pool -- coming back without that leaves the button spinning over
+a pool nobody is in.
+
+**One thing reported as a bug this round was not one.** Images sent yesterday were gone today.
+They were deleted on purpose: in a conversation where neither person had saved an account, media
+was kept for 24 hours (`pre-plan.md` 5 point 4), and `purged 2 media object(s)` is in the
+scheduler's log at the hour it happened. What was wrong was only what the app said about it --
+"Photo unavailable", which reads as breakage. An expired image now says "Photo expired": the box
+asks the API once, after a failure, and `unknown_media` (404) is the object having been reaped
+rather than anything having gone wrong. The window itself was then changed on the owner's
+instruction -- see below.
 
 **32 needs `platform` too.** The fix is a `/shush-media/` route on the app's own origin
 (`platform/edge/nginx/conf.d/shush.conf`, with MinIO joining the edge network under the alias
