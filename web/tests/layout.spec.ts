@@ -694,11 +694,11 @@ test("a message bubble stays selectable with a mouse", async ({ browser }) => {
 /**
  * A photo that is gone on purpose says so.
  *
- * <p>Images in a conversation where neither person has saved an account are kept for a day and
- * then deleted by the retention sweep -- `shush.storage.anonymous-retention` in
- * `application.yml`, and the product's own promise in `pre-plan.md` 5. So the commonest reason
- * a photo will not load is not a fault at all, it is yesterday; and "Photo unavailable" over a
- * deliberate expiry reads as the app being broken, which is how it was reported.
+ * <p>A shared image is deleted once its retention window is up -- `shush.storage.*-retention`
+ * in `application.yml`. So a photo that will not load has often not failed at all, it has
+ * expired; and "Photo unavailable" over a deliberate expiry reads as the app being broken,
+ * which is how it was reported. The window itself is guarded in `RetentionJobsIT`; what is
+ * guarded here is only what the bubble says when the object is gone.
  *
  * <p>The API answering 404 is what "the object has been reaped" looks like from the browser
  * (`unknown_media`), so that is what is served here. Nothing about the client is stubbed.

@@ -11,13 +11,12 @@ import { mediaUrl } from "@/lib/api";
  * squeeze it, with the alt text bleeding through underneath. This renders the same box either
  * way.
  *
- * <p>And it says which of the two it is. Images in a conversation where neither person has
- * saved an account are kept for a day and then deleted, on purpose (`application.yml`,
- * `shush.storage.anonymous-retention`) -- so the most common reason a photo will not load is
- * not a fault at all, it is yesterday. "Photo unavailable" over a deliberate expiry reads as
- * the app being broken, and the owner reported it as exactly that. An `<img>` cannot report a
- * status code, so the box asks the API once, and only after a failure: `unknown_media` is a
- * 404 and means the object has been reaped.
+ * <p>And it says which of the two it is. A shared image is deleted once its retention window
+ * is up (`application.yml`, `shush.storage.*-retention`), so a photo that will not load has
+ * often not failed at all -- it has expired. "Photo unavailable" over a deliberate expiry
+ * reads as the app being broken, and the owner reported it as exactly that. An `<img>` cannot
+ * report a status code, so the box asks the API once, and only after a failure:
+ * `unknown_media` is a 404 and means the object has been reaped.
  */
 export const ChatImage = ({
   mediaKey,
