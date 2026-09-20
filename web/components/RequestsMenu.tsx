@@ -4,7 +4,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { api } from "@/lib/api";
 import type { FriendRequest } from "@/lib/types";
-import { Person } from "./icons";
+import { PersonInbox } from "./icons";
 
 /**
  * Pending friend requests, in the header rather than taking permanent space in the sidebar.
@@ -51,9 +51,11 @@ export const RequestsMenu = ({
 
   return (
     <>
-      {/* A person, and beside it how many are waiting -- nothing drawn around either. With
-          none waiting it is a quiet outline button like the theme toggle next to it; with any,
-          it fills in the brand colour so the number is impossible to miss. */}
+      {/* A person in an envelope, and beside it how many are waiting. The person alone was
+          just "people" -- it named who this is about without naming what the button does; the
+          envelope is the half that says something is sitting here for an answer. With none
+          waiting it is a quiet outline button like the theme toggle next to it; with any, it
+          fills in the brand colour so the number is impossible to miss. */}
       <button
         ref={button}
         id="requestsButton"
@@ -72,7 +74,7 @@ export const RequestsMenu = ({
             : undefined
         }
       >
-        <Person />
+        <PersonInbox />
         {requests.length > 0 && (
           <span data-testid="requestCount" className="text-sm leading-none font-bold tabular-nums">
             {requests.length > 9 ? "9+" : requests.length}

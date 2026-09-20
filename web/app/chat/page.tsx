@@ -69,7 +69,7 @@ export default function Chat() {
     };
   }, []);
 
-  const setup = (bare: boolean) => (
+  const setup = (bare: boolean, onClose?: () => void) => (
     <SetupPanel
       interests={shush.interests}
       selected={shush.selected}
@@ -84,6 +84,7 @@ export default function Chat() {
       onFind={shush.findSomeone}
       onCancelFind={shush.cancelFind}
       bare={bare}
+      onClose={onClose}
     />
   );
 
@@ -209,13 +210,6 @@ export default function Chat() {
               setMobileView("detail");
               shush.openConversationFromHistory(conversation);
             }}
-            onFindSomeone={() => {
-              setMobileView("detail");
-              shush.goHome();
-              // "Find someone" finds someone: with interests already picked there is nothing
-              // left to ask, so the search starts here rather than behind a second button.
-              if (!shush.searching && shush.selected.length > 0) void shush.findSomeone();
-            }}
             onLogout={shush.logout}
             onSaveAccount={shush.saveAccount}
           />
@@ -277,7 +271,7 @@ export default function Chat() {
               onHideForMe={shush.hideForMe}
               onOpenImage={setViewing}
               onOpenCamera={() => setCameraOpen(true)}
-              setupPanel={setup(true)}
+              setupPanel={(close) => setup(true, close)}
             />
           )}
         </section>

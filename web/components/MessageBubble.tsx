@@ -217,7 +217,7 @@ export const MessageBubble = ({
         data-seq={message.seq ?? ""}
         data-mine={mine}
         data-deleted={Boolean(message.deleted)}
-        className="rise relative max-w-[74%]"
+        className="bubble rise relative max-w-[74%]"
         style={{
           transform: `translateX(${offset}px)`,
           transition: dragging.current ? "none" : "transform .18s ease",

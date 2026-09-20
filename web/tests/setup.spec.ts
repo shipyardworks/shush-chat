@@ -171,17 +171,25 @@ test("find someone after a conversation ends is already looking", async ({ brows
   await expect(modal.locator("#findSomeone")).toHaveText("Find someone");
 });
 
-test("find someone in the sidebar starts looking, under one name everywhere", async ({ browser }) => {
+/**
+ * The list of people you have talked to is a list, not a place to start a new conversation
+ * from. "Find someone" sat above both tabs whether or not either had anything in it, and the
+ * two ways on -- the logo, and the button an ended conversation already offers -- both land on
+ * the same screen, already holding what was picked last time.
+ */
+test("the sidebar offers no find button on either tab", async ({ browser }) => {
   const alice = await arrive(browser);
   const bob = await arrive(browser);
   await matchThem(alice, bob);
-  await expect(bob.locator("#newChat")).toHaveText("Find someone");
 
-  await bob.locator("#newChat").click();
-  await expect(bob.locator("#findSomeone")).toHaveAttribute("aria-busy", "true");
-  await bob.locator("#findSomeone").click();
-  await expect(bob.locator("#findSomeone")).toHaveAttribute("aria-busy", "false");
-  await expect(bob.locator("body")).not.toContainText("Find someone new");
+  const sidebar = bob.locator("#sidebar");
+  await expect(sidebar.getByRole("button", { name: "Find someone" })).toHaveCount(0);
+  await sidebar.getByRole("button", { name: "Friends" }).click();
+  await expect(sidebar.getByRole("button", { name: "Find someone" })).toHaveCount(0);
+
+  // Still one press away from the start screen, which is the thing that button was for.
+  await bob.locator("#home").click();
+  await expect(bob.locator("#findSomeone")).toBeVisible();
 });
 
 test("typing an interest that is already a tile picks that tile instead of copying it", async ({
@@ -228,7 +236,7 @@ test("a copy of a tile saved by an older version is folded back into the tile", 
   expect(Number(await chosen.first().getAttribute("data-interest-id"))).toBeGreaterThan(0);
 });
 
-test("the requests button is a person and, once someone asks, a count", async ({ browser }) => {
+test("the requests button carries a count only once somebody has asked", async ({ browser }) => {
   const alice = await arrive(browser);
   const bob = await arrive(browser);
   await matchThem(alice, bob);

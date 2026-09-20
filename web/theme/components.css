@@ -150,3 +150,32 @@
 @media (prefers-reduced-motion: reduce) {
   .chat-head { transition: none; }
 }
+
+/*
+  A message bubble on a touch screen.
+
+  Long press is the app's own gesture here -- it opens reactions and the actions menu. The
+  browser has a long press of its own on the same element: iOS Safari selects the word under
+  the finger and raises its Copy | Search with Google callout, Android does much the same. Both
+  menus then open at once, over each other, and the app's one is the one that gets dismissed.
+
+  So touch devices give the gesture to the app, and nothing is lost by it: Copy is already in
+  the menu that opens, and it copies the whole message rather than whichever word was pressed.
+  A mouse and a trackpad keep native selection, because there is no long press to collide with
+  there and dragging across text to copy part of it is a real thing people do.
+
+  -webkit-touch-callout stays outside the query: it only ever applies to touch, and iOS raises
+  the callout for an image regardless of user-select, which is what put a share sheet over a
+  photo that was being tapped to open.
+*/
+.bubble {
+  -webkit-touch-callout: none;
+}
+
+@media (hover: none) and (pointer: coarse) {
+  .bubble,
+  .bubble * {
+    -webkit-user-select: none;
+    user-select: none;
+  }
+}
