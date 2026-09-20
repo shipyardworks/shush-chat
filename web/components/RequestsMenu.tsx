@@ -52,10 +52,10 @@ export const RequestsMenu = ({
 
   return (
     <>
-      {/* A person with a badge, and beside it how many are waiting -- the same figure the
-          chat header uses for "add friend" and "asked", with the mark changed. An envelope
-          with a person inside it was the right idea and the wrong drawing: at this size the
-          shapes ran into each other and it read as a smudge. With none waiting this is a quiet
+      {/* A person with a list, and beside it how many are waiting -- the same figure the chat
+          header uses for "add friend" and "asked", with the mark changed. An envelope with a
+          person inside it was the right idea and the wrong drawing: at this size the shapes
+          ran into each other and it read as a smudge. With none waiting this is a quiet
           outline button like the theme toggle next to it; with any, it fills in the brand
           colour so the number is impossible to miss. */}
       <button
@@ -103,10 +103,11 @@ export const RequestsMenu = ({
                     className="flex flex-col gap-2 rounded-xl border p-3"
                     style={{ borderColor: "var(--color-line)", backgroundColor: "var(--color-surface-2)" }}
                   >
-                    {/* Their name. "Someone would like to keep you" is a question nobody can
-                        answer -- the app knows who it means and should say so. */}
+                    {/* Their name, and the thing everybody already calls this. "Someone
+                        would like to keep you" is a question nobody can answer -- the app
+                        knows who it means and should say so. */}
                     <p className="m-0 text-[13px]">
-                      {messages.requests.wantsToKeepYou(request.fromDisplayName ?? "Someone")}
+                      {messages.requests.sentYouOne(request.fromDisplayName ?? "Someone")}
                     </p>
                     <div className="flex flex-wrap items-center gap-2">
                       <button

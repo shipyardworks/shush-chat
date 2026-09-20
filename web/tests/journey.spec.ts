@@ -174,11 +174,13 @@ test("a request can be accepted from the chat, and the badge goes with it", asyn
   await alice.locator("#addFriend").click();
 
   // Bob is told where he is looking, rather than only in a header he may have scrolled past:
-  // a line in the thread, and a toast naming whoever asked -- on a phone with a conversation
-  // open, the header carrying that badge is hidden.
-  await expect(bob.locator("#messages")).toContainText(/asked to keep you/i);
+  // a line in the thread naming whoever asked, and the name bar itself opening and marking
+  // itself -- on a phone with a conversation open, the header carrying that badge is hidden,
+  // and this bar is the only place the answer button lives.
   const aliceName = (await alice.locator("[data-testid=myName]").textContent())!.trim();
-  await expect(bob.locator("#toast")).toContainText(aliceName);
+  await expect(bob.locator("#messages")).toContainText(`${aliceName} sent you a friend request.`);
+  await expect(bob.locator(".chat-head")).toHaveAttribute("data-collapsed", "false");
+  await expect(bob.locator(".chat-head")).toHaveAttribute("data-announcing", "true");
   await expect(bob.locator("[data-testid=requestCount]")).toHaveText("1");
 
   // The same control, answering instead of asking.

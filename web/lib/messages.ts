@@ -7,22 +7,28 @@
  * itself, which is the writing most worth keeping honest: short, plain, and never claiming
  * something the server has not actually said.
  *
- * <p>The rule here is a sentence you can read without stopping. Seven or eight words is plenty;
- * a pill in the middle of a conversation is a caption, not a paragraph. "Asked to keep them.
- * You will hear back only if they say yes." said in thirteen words what four say.
+ * <p>Two rules here. A sentence you can read without stopping -- seven or eight words is
+ * plenty, a pill in the middle of a conversation is a caption, not a paragraph. And one other
+ * person, never "they": every conversation in this app is exactly two people, so a line that
+ * says "they're offline" describes a crowd that does not exist. Anything about the other person
+ * takes their name, which is on screen anyway and is what you would actually say out loud.
  */
 export const messages = {
   /** Pills in the conversation itself. The room talking, not either person. */
   event: {
-    peerOffline: "They're offline. Messages will wait.",
-    peerBack: "They're back.",
+    peerOffline: (name: string) => `${name} is offline. Messages will wait.`,
+    peerBack: (name: string) => `${name} is back.`,
     youLeft: "You left.",
-    theyLeft: "They left.",
+    peerLeft: (name: string) => `${name} left.`,
     /** Your own ask, confirmed. The reply, if it comes, is the next line. */
-    asked: "Asked to keep them.",
-    alreadyAsked: "Already asked.",
-    /** Their ask, on the receiving side -- which used to say nothing at all here. */
-    theyAsked: "They asked to keep you.",
+    asked: "Friend request sent.",
+    alreadyAsked: "Request already sent.",
+    /**
+     * Their ask, on the receiving side -- which used to say nothing at all here, and then
+     * said "they asked to keep you", which is the app's own private word for it rather than
+     * the thing everybody already has a name for.
+     */
+    peerAsked: (name: string) => `${name} sent you a friend request.`,
     nowFriends: "You're friends now.",
     /** Reopened from the list, already finished. Said once, where the date pills are. */
     over: "This conversation is over.",
@@ -40,16 +46,21 @@ export const messages = {
 
   /** Asking to keep someone, and being asked. */
   requests: {
-    wantsToKeepYou: (name: string) => `${name} wants to keep you.`,
+    sentYouOne: (name: string) => `${name} sent you a friend request.`,
     none: "No requests yet.",
-    /** The toast, when the chat header that would have shown it is scrolled away. */
-    arrived: (name: string) => `${name} wants to keep you.`,
   },
 
-  /** Saving an anonymous account -- the one thing the app ever nags about. */
+  /**
+   * Saving an anonymous account -- the one thing the app ever nags about.
+   *
+   * <p>Left long on purpose. Everything else here is a caption beside something that explains
+   * itself; this is the only line that has to carry a consequence somebody has not thought of
+   * yet, and the short version ("Lose this browser, lose your chats.") reads as a slogan
+   * rather than as a warning about what is about to happen to their conversations.
+   */
   account: {
-    warning: "Lose this browser, lose your chats.",
-    why: "Keeps your chats. Sign in anywhere.",
+    warning: "Your chats and friends will be lost if you don't save your account.",
+    why: "Keep your chats and friends, and sign in from any device.",
   },
 
   /** The conversation header's second line. */

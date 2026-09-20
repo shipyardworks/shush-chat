@@ -75,7 +75,9 @@ test("leaving reaches both people and closes the conversation", async ({ browser
 
   // The whole bug: one side was sure, the other was never told.
   await expect(alice.locator("#messages")).toContainText("You left");
-  await expect(bob.locator("#messages")).toContainText("They left");
+  await expect(bob.locator("#messages")).toContainText(
+    `${(await bob.locator("#chatHeading").textContent())!.trim()} left.`,
+  );
 
   // And it is over for both -- no composer to type into.
   for (const page of [alice, bob]) {
@@ -99,21 +101,22 @@ test("an ended conversation offers the way to the next one, inside the conversat
   // Nothing but the fact and a button -- the picker itself is not here, so the ended thread
   // never grows a scrolling picker of its own the way it used to.
   await expect(bob.locator("#endedPanel [data-testid=interest]")).toHaveCount(0);
-  await expect(bob.locator("#findSomewhereElse")).toHaveCount(0);
+  await expect(bob.locator("#findSomeoneModal")).toHaveCount(0);
 
   // That it is over is said once, in the thread -- the footer is only the way on.
   await expect(bob.locator("#endedPanel")).not.toContainText("over");
-  await expect(bob.locator("#messages")).toContainText("They left.");
+  await expect(bob.locator("#messages")).toContainText(
+    `${(await bob.locator("#chatHeading").textContent())!.trim()} left.`,
+  );
 
-  // One click opens the picker in the conversation, at the top of it, already searching --
-  // not a dimmed screen with a panel floating over the thread you just finished. Escape
-  // closes it and stops the search.
+  // One click opens the picker -- the same panel the start screen shows, already searching.
+  // Escape closes it and stops the search.
   await bob.locator("#findSomeoneNext").click();
-  await expect(bob.locator("#findSomewhereElse [data-testid=interest]").first()).toBeVisible();
-  await expect(bob.locator("#findSomewhereElse #findSomeone")).toHaveAttribute("aria-busy", "true");
+  await expect(bob.locator("#findSomeoneModal [data-testid=interest]").first()).toBeVisible();
+  await expect(bob.locator("#findSomeoneModal #findSomeone")).toHaveAttribute("aria-busy", "true");
   await expect(bob.locator("#messages")).toBeVisible();
   await bob.keyboard.press("Escape");
-  await expect(bob.locator("#findSomewhereElse")).toHaveCount(0);
+  await expect(bob.locator("#findSomeoneModal")).toHaveCount(0);
   await expect(bob.locator("#endedPanel")).toBeVisible();
 });
 

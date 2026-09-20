@@ -480,12 +480,14 @@ lost claim means somebody *was* there and somebody else got them, so that waits 
 tick instead. And it is skipped entirely if this user is no longer in the pool, because that
 means they were the one claimed and a `matched` frame is already on its way.
 
-### The picker opens in the conversation, not over it
+### One picker, opened from two places
 
-"Find someone" from an ended thread opened a modal: a dimmed screen with a panel floating on
-it, hiding the conversation that had just finished. It is now a band at the top of the same
-column, above the messages, scrolling on its own. Same three controls, same one press to start
-searching, no second surface.
+"Find someone" from an ended thread opened a modal; it was then tried as a band at the top of
+the conversation, and that is worse at the only thing it has to do. The band is a second,
+differently shaped version of a panel the app already has, so finding someone looked like one
+thing from the start screen and another from a finished conversation. It is the modal again --
+the same `SetupPanel`, the same 620px panel, the same padding -- and the picker is one thing
+with one shape wherever it is opened from.
 
 ### A typed interest appears before the server has confirmed it
 
@@ -519,19 +521,44 @@ voices. They are one file now, and short: "Asked to keep them. You will hear bac
 say yes." said in thirteen words what four say. The rule is a sentence that can be read without
 stopping -- seven or eight words, because a pill in the middle of a conversation is a caption.
 
-### The request icon is a person and a badge
+Two later corrections, both from reading the result on a phone. **Nothing says "they".** Every
+conversation here is exactly two people, so "they're offline" described a crowd that does not
+exist; anything about the other person now takes their name, which is on screen anyway and is
+what anyone would say out loud. And **the app uses the words the world already has**: "they
+asked to keep you" was this codebase's private term for a friend request, and the line says
+that now. The one line left long is the save-account warning, which is the only one that has
+to carry a consequence nobody has thought of yet -- the short version read as a slogan.
+
+### The request icon is a person and a list
 
 An envelope with a person inside it was three shapes fighting for eighteen pixels, and read as
-a smudge. Asking to keep someone, having asked, and being asked are three states of one idea,
-so they are now one figure with one mark changing: a plus, a tick, a badge.
+a smudge. A person with a badge dot replaced it and was a smaller version of the same problem:
+at 18px a mark that size cannot be told from the figure it sits on. It is a person with the
+burger beside it -- the glyph that already means "a list of things" in both headers. Asking to
+keep someone, having asked, and being asked are still three states of one idea: one figure,
+one mark changing, a plus, a tick, a list.
 
-### Leave is at the left of the chat, and a request can be accepted from it
+### The way out of a conversation is beside the message box
 
-Leaving is the first half of finding somebody else, so the button moved from the far right of
-the header to the near edge, beside the burger. And when the other person has asked to keep
-you, the button that would ask them becomes the one that answers -- accepting there clears the
-header's menu and its count, because the button, the list and the badge are three readings of
-one list.
+Leaving was in the header's far corner, then in its near one, and the header is the problem
+either way: on a phone it is scrolled shut by the time anybody wants out, so ending a
+conversation meant scrolling back up to a corner. It sits next to the composer now, where the
+thumb already is, and it says **Switch** -- "Leave" named what happens to the conversation
+rather than what anyone wants, and "Skip" is the obvious competitor's word. A friend's
+conversation has nothing to leave and gets the way to a new stranger in the same slot, which
+on a phone it had no way to reach at all.
+
+And when the other person has asked to keep you, the button that would ask them becomes the
+one that answers -- accepting there clears the header's menu and its count, because the
+button, the list and the badge are three readings of one list.
+
+### Being asked is announced by the bar that answers it
+
+A request arriving raised a toast, which was wrong twice over: it covered the conversation,
+and it went away again while the button it was about stayed hidden. On a phone the app header
+holding the requests badge is hidden while a conversation is open, and the chat header is
+scrolled shut -- so the announcement *is* that header opening itself and marking itself for a
+few seconds, with "Accept request" already in it. The pill in the thread names who asked.
 
 ### `docs/SCHEMA.md` is generated
 

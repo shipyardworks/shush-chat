@@ -147,8 +147,35 @@
   }
 }
 
+/*
+  Being asked, announced by the bar that answers it.
+
+  On a phone this is the only place an incoming request can show up: the app header holding
+  the badge is hidden while a conversation is open, and this bar is shut by the time anybody
+  has scrolled. So it opens itself and then says so for a moment -- a bar that silently
+  reappears behind whatever is being read is not an announcement.
+*/
+.chat-head[data-announcing="true"] .chat-head-row {
+  animation: head-announce 1.3s ease-out 2;
+}
+
+@keyframes head-announce {
+  0%,
+  100% {
+    background-color: transparent;
+  }
+  40% {
+    background-color: color-mix(in srgb, var(--color-brand) 18%, transparent);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .chat-head { transition: none; }
+  /* Still marked, just not flashing: the colour stays for as long as the attribute is on. */
+  .chat-head[data-announcing="true"] .chat-head-row {
+    animation: none;
+    background-color: color-mix(in srgb, var(--color-brand) 14%, transparent);
+  }
 }
 
 /*

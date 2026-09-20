@@ -482,8 +482,9 @@ test("the paperclip sits inside the message box, beside the camera", async ({ br
  * Both icons are built on a person, and each says what it is for beyond that.
  *
  * <p>The requests button used to be a bare person, which named who it was about and nothing
- * about why it was a button -- it now sits in an envelope. Add friend keeps its plus. What
- * this guards is that neither is a plain figure and that they are not the same drawing.
+ * about why it was a button. It carries a list now -- the same burger that means "a list of
+ * things" in both headers -- and add friend keeps its plus. What this guards is that neither
+ * is a plain figure and that they are not the same drawing.
  */
 test("the requests and add-friend icons each say more than just person", async ({ browser }) => {
   const alice = await arriveOnPhone(browser);
@@ -492,11 +493,11 @@ test("the requests and add-friend icons each say more than just person", async (
 
   const paths = (page: Page, id: string) => page.locator(`${id} svg path`).count();
   // One person in each, drawn the same way: a head, a body, and one mark that says which of
-  // the three things this is. Requests carries its mark as a second circle, add-friend as a
-  // plus. The envelope this replaced was three shapes fighting for eighteen pixels.
-  expect(await alice.locator("#requestsButton svg circle").count(), "a head and a badge").toBe(2);
+  // the three things this is. Requests carries its mark as lines beside the figure,
+  // add-friend as a plus. A dot was tried and is too small to tell from the figure at 18px.
+  expect(await alice.locator("#requestsButton svg circle").count(), "one head, no badge").toBe(1);
   expect(await alice.locator("#addFriend svg circle").count()).toBe(1);
-  expect(await paths(alice, "#requestsButton"), "the person's body").toBe(1);
+  expect(await paths(alice, "#requestsButton"), "a body and the lines").toBe(2);
   expect(await paths(alice, "#addFriend"), "a plus beside the person").toBeGreaterThan(1);
 
   const requests = await alice.locator("#requestsButton svg").innerHTML();
@@ -603,7 +604,7 @@ test("the picker's close button sits on the heading's own line", async ({ browse
   await alice.locator("#leave").click();
   await bob.locator("#findSomeoneNext").click();
 
-  const modal = bob.locator("#findSomewhereElse");
+  const modal = bob.locator("#findSomeoneModal");
   await expect(modal).toBeVisible();
   const close = (await modal.locator("#closePicker").boundingBox())!;
   const heading = (await modal.getByText("What are you into?").boundingBox())!;
@@ -744,26 +745,57 @@ test("a photo that fails for any other reason does not claim to have expired", a
 });
 
 /**
- * Leave is at the near edge of the conversation, not out in the far corner.
+ * The way out of a conversation is beside the message box, not up in the header.
  *
- * <p>Leaving is the first half of finding somebody else, and the two presses that end one
- * conversation and start the next should be next to each other. On a phone the right-hand end
- * of a header is the corner a thumb reaches last.
+ * <p>It was in the header's far corner, then in its near one, and the header is the problem
+ * either way: it is scrolled shut by the time anybody wants out. Down beside the composer it
+ * is where the thumb already is, one press from whatever was being done. A friend's
+ * conversation has nothing to leave, and gets the way to a new stranger in the same slot --
+ * which on a phone it had no way to reach at all.
  */
-test("leave sits at the left of the chat, before the name", async ({ browser }) => {
+test("the way out sits beside the message box, not in the header", async ({ browser }) => {
   const alice = await arriveOnPhone(browser);
   const bob = await arriveOnPhone(browser);
   await matchThem(alice, bob);
 
   const leave = (await alice.locator("#leave").boundingBox())!;
-  const avatar = (await alice.locator("#chatAvatar").boundingBox())!;
-  const addFriend = (await alice.locator("#addFriend").boundingBox())!;
+  const composer = (await alice.locator("#composer").boundingBox())!;
+  const head = (await alice.locator(".chat-head-row").boundingBox())!;
 
-  expect(leave.x + leave.width).toBeLessThanOrEqual(avatar.x + 1);
-  expect(leave.x).toBeLessThan(addFriend.x);
-  // And it is still gone once the conversation is over -- there is nothing left to leave.
+  // Left of the message box, on the same row as it, and nowhere near the header.
+  expect(leave.x + leave.width).toBeLessThanOrEqual(composer.x + 1);
+  expect(leave.y).toBeGreaterThan(head.y + head.height);
+  expect(Math.abs(leave.y + leave.height / 2 - (composer.y + composer.height / 2))).toBeLessThan(24);
+
+  // And it is gone once the conversation is over -- there is nothing left to leave.
   await alice.locator("#leave").click();
   await expect(alice.locator("#leave")).toHaveCount(0);
+});
+
+/**
+ * A friend's conversation offers the way to a new stranger, in that same place.
+ */
+test("a friend's conversation can start a new one from the message box", async ({ browser }) => {
+  const alice = await arriveOnPhone(browser);
+  const bob = await arriveOnPhone(browser);
+  await matchThem(alice, bob);
+  await alice.locator("#addFriend").click();
+  await bob.locator("#acceptRequest").click();
+
+  // Leaving is not a thing you can do to a friend, so that slot is the other half of it.
+  await expect(bob.locator("#leave")).toHaveCount(0);
+  const find = (await bob.locator("#findFromChat").boundingBox())!;
+  const composer = (await bob.locator("#composer").boundingBox())!;
+  expect(find.x + find.width).toBeLessThanOrEqual(composer.x + 1);
+
+  await bob.locator("#findFromChat").click();
+  await expect(bob.locator("#findSomeoneModal")).toBeVisible();
+
+  // Closed again before this test is over. Opening the picker starts a real search, and a
+  // page left searching stays in the server's pool for as long as its socket is open --
+  // every later test in this run would then be matching against a ghost.
+  await bob.locator("#closePicker").click();
+  await expect(bob.locator("#findSomeoneModal")).toHaveCount(0);
 });
 
 /**

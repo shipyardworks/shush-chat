@@ -9,19 +9,26 @@
  */
 
 /**
- * A person with a small badge beside them: somebody is waiting on an answer.
+ * A person with a list beside them: the requests waiting for an answer.
  *
- * <p>This was a person inside an envelope, which at 18px on a dark header was a shape nobody
- * could read -- three overlapping forms in the space of a fingernail. It is now the same
- * figure as {@link PersonPlus} and {@link PersonCheck}, with a filled dot where their plus and
- * tick sit. That is the point: asking to keep someone, having asked, and being asked are three
- * states of one idea, so they are one drawing with one mark changing.
+ * <p>Three drawings, one figure, one mark changing -- {@link PersonPlus} is asking,
+ * {@link PersonCheck} is having asked, and this is the pile of people asking you. It was an
+ * envelope with a person inside it first, which at 18px was three overlapping shapes in the
+ * space of a fingernail, and then the same figure with a dot, which is a smaller version of
+ * the same problem: a mark that small cannot be told from the figure it sits on. Lines read
+ * at any size, and they are the burger already used for "a list of things" in both headers.
  */
 export const PersonRequests = ({ className = "h-[18px] w-[18px]" }: { className?: string }) => (
   <svg viewBox="0 0 24 24" className={`${className} flex-none`} fill="currentColor" aria-hidden>
     <circle cx="9.2" cy="7.6" r="4.3" />
     <path d="M0.8 20.8c0-4.4 3.8-7.3 8.4-7.3s8.4 2.9 8.4 7.3Z" />
-    <circle cx="20.2" cy="13.4" r="3.4" />
+    <path
+      d="M16.8 10.4H24M16.8 14.4H24M16.8 18.4H24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.1"
+      strokeLinecap="round"
+    />
   </svg>
 );
 

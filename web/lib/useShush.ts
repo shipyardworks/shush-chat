@@ -139,11 +139,6 @@ export const useShush = () => {
   // Whether the live connection is actually up. Everything real-time rides on one socket, so
   // when it is down the app has to say so rather than accept presses it cannot deliver.
   const [connected, setConnected] = useState(false);
-  // Something worth looking up for, shown briefly over whatever is on screen. A request
-  // arriving is the only thing that raises one so far: the header that would have shown it is
-  // deliberately hidden while a conversation is open on a phone, so without this the only
-  // signal was a badge nobody could see.
-  const [toast, setToast] = useState<string | null>(null);
 
   const socket = useRef<WebSocket | null>(null);
   // The token this browser holds, kept so the socket can be rebuilt without signing in again.
@@ -160,6 +155,9 @@ export const useShush = () => {
   const lastDay = useRef<string | null>(null);
   const peerReadSeq = useRef(0);
   const conversationRef = useRef<string | null>(null);
+  // The person on screen, readable from inside a frame handler. Every pill about the other
+  // person names them, and a handler built one render ago would name whoever was there then.
+  const peerRef = useRef<Peer>({ userId: null, name: null, heading: "", sub: "" });
   const viewRef = useRef<"setup" | "chat">("setup");
   const typingSentAt = useRef(0);
   const hintTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -192,6 +190,9 @@ export const useShush = () => {
     conversationRef.current = conversationId;
   }, [conversationId]);
   useEffect(() => {
+    peerRef.current = peer;
+  }, [peer]);
+  useEffect(() => {
     viewRef.current = view;
   }, [view]);
   useEffect(() => {
@@ -212,13 +213,6 @@ export const useShush = () => {
   useEffect(() => {
     patienceRef.current = patience;
   }, [patience]);
-
-  /** A toast says one thing and goes. Four seconds is long enough to read six words. */
-  useEffect(() => {
-    if (!toast) return;
-    const timer = setTimeout(() => setToast(null), 4000);
-    return () => clearTimeout(timer);
-  }, [toast]);
 
   /** Re-run after every reconnect: assigned once the callbacks it needs exist. */
   const onReconnected = useRef<() => void>(() => {});
@@ -577,7 +571,8 @@ export const useShush = () => {
       }
 
       if (type === "presence") {
-        appendEvent(frame.online ? messages.event.peerBack : messages.event.peerOffline);
+        const who = peerRef.current.name ?? peerRef.current.heading ?? "Someone";
+        appendEvent(frame.online ? messages.event.peerBack(who) : messages.event.peerOffline(who));
         void refreshLists();
         return;
       }
@@ -591,27 +586,26 @@ export const useShush = () => {
         }
         setEnded(true);
         appendEvent(
-          String(frame.userId) === meRef.current ? messages.event.youLeft : messages.event.theyLeft,
+          String(frame.userId) === meRef.current
+            ? messages.event.youLeft
+            : messages.event.peerLeft(peerRef.current.name ?? "Someone"),
         );
         void refreshLists();
         return;
       }
 
       if (type === "friendRequested") {
-        // Said on this side too. The sender has always seen "Asked to keep them" in the
-        // thread; the person being asked saw a badge in a header that is deliberately hidden
-        // while a conversation is open on a phone -- so on the screen where it actually
-        // matters, the ask was invisible.
+        // Said on this side too. The sender has always seen the ask confirmed in the thread;
+        // the person being asked saw a badge in a header that is deliberately hidden while a
+        // conversation is open on a phone -- so on the screen where it actually matters, the
+        // ask was invisible.
         if (String(frame.conversationId) === conversationRef.current) {
-          appendEvent(messages.event.theyAsked);
+          appendEvent(messages.event.peerAsked(peerRef.current.name ?? "Someone"));
         }
-        // Named from the reloaded list rather than from whoever happens to be on screen: a
-        // request can arrive from an earlier conversation, and a toast naming the wrong
-        // person is worse than one naming nobody.
-        void reloadRequests().then((list) => {
-          const asked = list.find((request) => request.id === String(frame.requestId));
-          setToast(messages.requests.arrived(asked?.fromDisplayName ?? "Someone"));
-        });
+        // The list is what everything else reads from: the header's badge, the requests menu,
+        // and the button in the conversation that turns into "Accept request" -- which is
+        // also what brings the chat header back down on a phone. One reload, four places.
+        void reloadRequests();
         return;
       }
 
@@ -1468,7 +1462,6 @@ export const useShush = () => {
     isFriendConversation: withAFriend,
     incomingRequest,
     acceptIncoming,
-    toast,
     replyingTo,
     setReplyingTo,
     attachment,

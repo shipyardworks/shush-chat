@@ -727,23 +727,33 @@ placeholder id -- negative, so it can never be sent anywhere -- and is swapped f
 when it lands. Adding a word while the app is already looking asks the server again with it,
 rather than leaving it matching on the list it was given before the word existed.
 
-**The picker for the next conversation opens inside the chat, not over it.** It was a modal:
-a dimmed screen and a panel hiding the conversation that had just finished. It is now a band
-at the top of the same column, above the messages.
+**The picker for the next conversation is the one the start screen shows.** It was a modal,
+then a band at the top of the conversation, and the band is the worse of the two: a second,
+differently shaped version of a panel that already exists, so finding someone looked like one
+thing from the start screen and another from a finished chat. Same panel, same width, wherever
+it is opened from.
 
-**Leave is on the left of the chat header.** Leaving is the first half of finding somebody
-else, and the right-hand end of a header is the corner a thumb reaches last.
+**The way out of a conversation is beside the message box, and is called Switch.** It was in
+the header's far corner, then in its near one, and on a phone the header is scrolled shut by
+the time anybody wants out -- leaving meant scrolling back up to a corner. "Leave" named what
+happens to the conversation rather than what anyone wants; "Skip" is the obvious competitor's
+word. A friend's conversation has nothing to leave, so the same slot is the way to a new
+stranger -- which, on a phone, a friend's thread had no other route to.
 
 **A request can be accepted from the conversation it was made in.** The button that would ask
 to keep someone becomes the one that answers them, and accepting there empties the header's
 requests menu and its count -- the button, the list and the badge are three readings of one
-list. The person being asked is also told in the thread, and by a toast: on a phone with a
-conversation open, the header carrying that badge is deliberately hidden, so the ask used to
-arrive invisibly.
+list. On a phone, the arrival is announced by the chat header opening itself and marking
+itself for a few seconds, with that button already in it. A toast was tried and removed: it
+covered the conversation and then went away again, while the button it was about stayed
+hidden.
 
-**Everything the app says lives in `web/lib/messages.ts`, and is short.** Seven or eight words.
-A pill in the middle of a conversation is a caption, not a paragraph: "Asked to keep them. You
-will hear back only if they say yes." said in thirteen words what four say.
+**Everything the app says lives in `web/lib/messages.ts`, is short, and never says "they".**
+Seven or eight words; a pill in the middle of a conversation is a caption, not a paragraph.
+Every conversation here is two people, so anything about the other one takes their name -- and
+it uses the words the world already has, so "they asked to keep you" is "<name> sent you a
+friend request". The save-account warning is the one line deliberately left long: it is the
+only one carrying a consequence nobody has thought of yet.
 
 **Infrastructure and running it**
 

@@ -4,6 +4,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ChatItem, Message } from "@/lib/types";
 import type { Peer } from "@/lib/useShush";
 import { Avatar } from "./Avatar";
+import { createPortal } from "react-dom";
 import { Menu, PersonCheck, PersonPlus } from "./icons";
 import { MessageList } from "./MessageList";
 
@@ -86,6 +87,8 @@ export const ChatPanel = ({
    * `.chat-head` (components.css) holds the breakpoint, so sm and up never collapses.
    */
   const [headCollapsed, setHeadCollapsed] = useState(false);
+  /** Briefly true after a request lands, so the bar that just opened is noticed. */
+  const [announcing, setAnnouncing] = useState(false);
   const file = useRef<HTMLInputElement>(null);
   const composer = useRef<HTMLTextAreaElement>(null);
 
@@ -130,10 +133,31 @@ export const ChatPanel = ({
   }, [peer.userId, ended]);
 
   // Opening someone else's conversation is exactly when their name matters, so it is never
-  // inherited half-shut from the thread before it.
+  // inherited half-shut from the thread before it. And the picker goes with the conversation
+  // it was opened over: a match found from a friend's thread never ends that thread, so
+  // nothing else would take the picker off the top of the one it just found.
   useEffect(() => {
     setHeadCollapsed(false);
+    setPicking(false);
   }, [peer.userId]);
+
+  /**
+   * A request arriving brings the name bar back down, and marks it for a moment.
+   *
+   * <p>This is the whole of how being asked is announced on a phone. The app header holding
+   * the requests badge is hidden while a conversation is open, and the chat header is
+   * scrolled shut by the time anyone has said anything -- so the only place the ask can
+   * appear is the bar that carries the button answering it, which means opening that bar.
+   * A toast was tried here first and was the wrong thing twice over: it covered the
+   * conversation, and it went away again while the button it was about stayed hidden.
+   */
+  useEffect(() => {
+    if (!incomingRequest) return;
+    setHeadCollapsed(false);
+    setAnnouncing(true);
+    const timer = setTimeout(() => setAnnouncing(false), 4000);
+    return () => clearTimeout(timer);
+  }, [incomingRequest]);
 
   useEffect(() => {
     if (!picking) return;
@@ -148,13 +172,13 @@ export const ChatPanel = ({
 
   return (
     <div id="chat" className="flex min-h-0 flex-1 flex-col">
-      <div className="chat-head" data-collapsed={headCollapsed}>
+      <div className="chat-head" data-collapsed={headCollapsed} data-announcing={announcing}>
       {/* The clipping wrapper carries no padding or border of its own, deliberately. The row
           below is border-box, so a padded element cannot be squeezed below its own padding
           plus border -- collapsing it directly left a 29px strip that would not close. */}
       <div>
       <div
-        className="flex items-center gap-2 border-b px-3.5 py-3.5 sm:gap-3 sm:px-[22px]"
+        className="chat-head-row flex items-center gap-2 border-b px-3.5 py-3.5 sm:gap-3 sm:px-[22px]"
         style={{ borderColor: "var(--color-line-soft)" }}
       >
         {onBack && (
@@ -170,26 +194,6 @@ export const ChatPanel = ({
             className="btn-ghost -ml-1 grid h-9 w-9 flex-none place-items-center rounded-full p-0 sm:hidden"
           >
             <Menu />
-          </button>
-        )}
-        {/* Leave sits here, at the near edge, and not out on the right with the other
-            actions. Leaving is the first half of finding somebody else, and on a phone the
-            right side of a header is the far corner from a thumb -- the two presses that end
-            one conversation and start the next should be next to each other, not at opposite
-            ends of the screen. */}
-        {!isFriendConversation && !ended && (
-          <button
-            id="leave"
-            type="button"
-            title="Leave"
-            aria-label="Leave"
-            className="btn-ghost flex h-9 flex-none items-center justify-center gap-1.5 rounded-full px-2.5 sm:px-3"
-            onClick={onLeave}
-          >
-            <svg viewBox="0 0 24 24" className="h-4 w-4 flex-none" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9" />
-            </svg>
-            <span className="hidden sm:inline">Leave</span>
           </button>
         )}
         <button id="chatAvatar" type="button" title="View profile" onClick={onOpenPeer}>
@@ -213,8 +217,8 @@ export const ChatPanel = ({
           </div>
         </button>
         <span className="flex-1" />
-        {/* Already friends means there is nothing left to ask for. Leave is drawn on the left,
-            beside the burger -- see the comment there. */}
+        {/* Already friends means there is nothing left to ask for. Leaving is not up here at
+            all any more -- it sits beside the message box, where the thumb already is. */}
         {!isFriendConversation && (
           <>
             {/* Still offered after somebody leaves: asking to keep them is the one thing a
@@ -269,24 +273,6 @@ export const ChatPanel = ({
       </div>
       </div>
 
-      {/* The picker, in the conversation rather than over it.
-
-          It used to be a modal: a dimmed screen and a panel floating on top, which is a lot of
-          ceremony for "pick a word and press a button", and it hid the thread you had just
-          finished while you did. Sitting under the header it is the same three controls, in
-          the place the next conversation will appear, and the messages stay visible
-          underneath. It scrolls on its own so a long interest strip cannot push the
-          conversation off the screen. */}
-      {picking && (
-        <div
-          id="findSomewhereElse"
-          className="rise max-h-[62%] shrink-0 overflow-y-auto border-b px-3.5 py-3.5 sm:px-[22px]"
-          style={{ borderColor: "var(--color-line-soft)", backgroundColor: "var(--color-surface-2)" }}
-        >
-          {setupPanel(closePicker)}
-        </div>
-      )}
-
       <MessageList
         items={items}
         loading={historyLoading}
@@ -315,7 +301,7 @@ export const ChatPanel = ({
         >
           <div className="min-w-0 flex-1">
             <div className="text-[11px] font-semibold" style={{ color: "var(--color-brand)" }}>
-              Replying to {replyingTo.senderId === meId ? "yourself" : "them"}
+              Replying to {replyingTo.senderId === meId ? "yourself" : (peer.name ?? "them")}
             </div>
             <div className="truncate text-[13px]" style={{ color: "var(--color-muted)" }}>
               {replyingTo.kind === "image" ? "Photo" : replyingTo.body}
@@ -333,7 +319,7 @@ export const ChatPanel = ({
         </div>
       )}
 
-      {ended && picking ? null : ended ? (
+      {ended ? (
         /* Only the way on. That it is over is said once, as a pill in the thread itself, and
            the picker this opens is already searching -- one press, not two. */
         <div
@@ -371,6 +357,49 @@ export const ChatPanel = ({
               event.target.value = "";
             }}
           />
+          {/* Beside the message box, because that is where the thumb already is.
+
+              This was in the top right of the header, then in its top left, and both are the
+              same mistake: the header is gone by the time anybody wants it. You scroll while
+              you talk, the name bar slides shut behind you, and ending a conversation you are
+              not enjoying meant scrolling all the way back up to a corner. Down here it is one
+              press away from whatever you were doing, next to the other thing you can do to a
+              conversation -- and the two never both appear, so it costs one button's width.
+
+              "Switch" rather than "Leave", which said what happens to this conversation
+              instead of what you actually want, and rather than "Skip", which is the word the
+              obvious competitor's button uses. In a friend's conversation there is nothing to
+              leave, so the same slot is the way to a new stranger -- the thing a friend's
+              thread had no way to reach at all on a phone. */}
+          {isFriendConversation ? (
+            <button
+              id="findFromChat"
+              type="button"
+              title="Find someone new"
+              aria-label="Find someone new"
+              className="btn-ghost flex h-10 flex-none items-center justify-center gap-1.5 self-end rounded-full px-2.5 sm:px-3.5"
+              onClick={findNext}
+            >
+              <svg viewBox="0 0 24 24" className="h-[18px] w-[18px] flex-none" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M3 8h14l-4-4M21 16H7l4 4" />
+              </svg>
+              <span className="hidden text-[14px] sm:inline">Find someone</span>
+            </button>
+          ) : (
+            <button
+              id="leave"
+              type="button"
+              title="Switch to someone else"
+              aria-label="Switch to someone else"
+              className="btn-ghost flex h-10 flex-none items-center justify-center gap-1.5 self-end rounded-full px-2.5 sm:px-3.5"
+              onClick={onLeave}
+            >
+              <svg viewBox="0 0 24 24" className="h-[18px] w-[18px] flex-none" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9" />
+              </svg>
+              <span className="hidden text-[14px] sm:inline">Switch</span>
+            </button>
+          )}
           <div className="field composer flex min-w-0 flex-1 items-end gap-0.5 rounded-[22px] py-0 pr-1 pl-4">
             {/* A textarea, not an <input>. iOS offers its password / card / address AutoFill
                 bar above the keyboard for any text input it cannot rule out as part of a form,
@@ -450,6 +479,32 @@ export const ChatPanel = ({
         </div>
       )}
 
+      {/* The picker, over the conversation and exactly the one the start screen shows.
+
+          It was tried as a band inside the chat, above the messages, and the band is worse at
+          the only thing it has to do: it is a second, differently-shaped version of a panel
+          this app already has, so "find someone" looked like one thing from the start screen
+          and another from a finished conversation. Same panel, same width, same padding,
+          wherever it is opened from. */}
+      {picking &&
+        createPortal(
+          <div
+            id="findSomeoneModal"
+            className="fixed inset-0 z-50 grid grid-cols-1 place-items-center overflow-y-auto p-3 backdrop-blur-[3px] sm:p-5"
+            style={{ backgroundColor: "var(--color-scrim)" }}
+            onClick={(event) => {
+              if (event.target === event.currentTarget) closePicker();
+            }}
+          >
+            {/* The close is drawn by the panel itself, beside its own first heading -- see
+                SetupPanel's `onClose`. It used to sit on a row of its own above it, which on a
+                phone is a whole empty band above a picker that is already tight for height. */}
+            <div role="dialog" aria-modal="true" className="panel rise w-full max-w-[620px] p-4 sm:p-7">
+              {setupPanel(closePicker)}
+            </div>
+          </div>,
+          document.body,
+        )}
     </div>
   );
 };

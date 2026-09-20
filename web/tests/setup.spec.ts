@@ -159,7 +159,7 @@ test("find someone turns into the search itself, and tapping it again stops it",
   await expect(page.locator("#findStatus")).toHaveCount(0);
 });
 
-test("find someone after a conversation ends opens in the chat, already looking", async ({
+test("find someone after a conversation ends opens the picker the start screen shows", async ({
   browser,
 }) => {
   const alice = await arrive(browser);
@@ -167,18 +167,17 @@ test("find someone after a conversation ends opens in the chat, already looking"
   await matchThem(alice, bob);
   await alice.locator("#leave").click();
   await expect(bob.locator("#findSomeoneNext")).toHaveText("Find someone");
-  await bob.locator("#findSomeoneNext").click();
 
-  // In the conversation, not floating over it behind a dimmed screen: the picker is a band at
-  // the top of the same column, and the messages are still there underneath it.
-  const picker = bob.locator("#findSomewhereElse");
+  // Somebody sitting on the start screen, so the panel there and the panel here can be
+  // measured against each other: one picker, one shape, wherever it is opened from.
+  const onlooker = await arrive(browser);
+  const onStart = (await onlooker.locator("#interestTiles").boundingBox())!;
+
+  await bob.locator("#findSomeoneNext").click();
+  const picker = bob.locator("#findSomeoneModal");
   await expect(picker).toBeVisible();
-  await expect(bob.locator("#messages")).toBeVisible();
-  const band = (await picker.boundingBox())!;
-  const messages = (await bob.locator("#messages").boundingBox())!;
-  // Above the messages and in the same column, rather than floating over the middle of them.
-  expect(band.y).toBeLessThan(messages.y);
-  expect(band.y + band.height).toBeLessThan(messages.y + messages.height);
+  const inModal = (await picker.locator("#interestTiles").boundingBox())!;
+  expect(Math.abs(inModal.width - onStart.width), "the same panel, not a second one").toBeLessThan(2);
 
   // One press: it opens on the search itself, not on a second "Find someone".
   await expect(picker.locator("#findSomeone")).toHaveAttribute("aria-busy", "true");
@@ -385,7 +384,7 @@ test("an unsaved account gets one plain line and a button, not a form", async ({
   const page = await arrive(browser);
   // At the foot of the sidebar, where "Signed in" appears once it is saved.
   await expect(page.locator("#sidebar #saveStrip")).toBeVisible();
-  await expect(page.locator("#saveWarning")).toContainText("Lose this browser");
+  await expect(page.locator("#saveWarning")).toContainText("will be lost");
   await expect(page.locator("#email")).toHaveCount(0);
 
   await page.locator("#openSave").click();

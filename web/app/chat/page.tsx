@@ -132,7 +132,8 @@ export default function Chat() {
         )}
         {/* The logo goes back to the start screen. It only changes what is on screen: walking
             out of a live conversation by navigating away would be a silent disappearance
-            for the other person, and Leave is still the button that ends it. */}
+            for the other person, and Switch, beside the message box, is still the button that
+            ends it. */}
         <button
           id="home"
           type="button"
@@ -313,25 +314,6 @@ export default function Chat() {
           }}
         >
           Reconnecting…
-        </div>
-      )}
-
-      {/* Something arrived that the header would have shown, on a screen where the header is
-          deliberately not there. A request is the whole reason this exists: on a phone, with a
-          conversation open, the badge that announces one is hidden along with the header it
-          sits in, so the only sign of being asked was a screen that had not changed. */}
-      {shush.toast && (
-        <div
-          id="toast"
-          role="status"
-          className="rise fixed top-2 left-1/2 z-[70] -translate-x-1/2 rounded-full border px-3.5 py-1.5 text-[12px] shadow-lg"
-          style={{
-            borderColor: "var(--color-brand)",
-            backgroundColor: "var(--color-surface-2)",
-            color: "var(--color-body)",
-          }}
-        >
-          {shush.toast}
         </div>
       )}
 
