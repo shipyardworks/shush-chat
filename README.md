@@ -369,7 +369,7 @@ itself out across both sides.
 
 ### And in the build
 
-`./mvnw clean verify` runs 169 integration tests against real Postgres, Redis, Redpanda,
+`./mvnw clean verify` runs 190 tests against real Postgres, Redis, Redpanda,
 Elasticsearch and MinIO via Testcontainers. **Nothing is mocked, and the broker never will be:**
 partition assignment is exactly the behaviour a mock removes, and it is the behaviour the whole
 claim rests on. Two of those tests start a *second* full application context against the same
@@ -487,8 +487,8 @@ nginx resolves upstream hostnames once at startup, so after rebuilding the repli
 ### Tests
 
 ```bash
-cd api && ./mvnw clean verify      # 173 tests, real infrastructure, nothing needs to be running
-cd web && npm test                 # the browser journey, against a stack that IS running
+cd api && ./mvnw clean verify      # 190 tests, real infrastructure, nothing needs to be running
+cd web && npm test                 # 82 browser tests, against a stack that IS running
 ```
 
 The Java suite runs against real Postgres, Redis, Redpanda, Elasticsearch and MinIO, started and
@@ -704,6 +704,46 @@ eventually deleted on purpose, and "Photo unavailable" over a deliberate expiry 
 being broken -- it was reported as exactly that. The box asks the API once, only after a load has
 failed, and a 404 (`unknown_media`) means the object has been reaped rather than anything having
 gone wrong.
+
+**Friends are matched like anybody else, and are not asked to be kept twice.** Matching used
+to skip anyone already in your friends list. That reads as sensible and is wrong once the pool
+is small: keep two or three people and the matcher starts refusing the only people who are
+ever around -- and it was permanent, so once two accounts had kept each other nothing could
+pair them again. Blocks are still excluded. A matched friend gets "Already friends" as the
+subtitle and no ask-to-keep button, decided from the friends list rather than from how the
+thread was opened.
+
+**Five seconds means five seconds.** The patience dial governed only how we matched -- hold out
+for a shared interest, then take anyone -- so with nobody there at all it governed nothing and
+the button span "Still looking" indefinitely. The server now ends the search, says so, and puts
+the button back. "Forever" is the one setting that never gives up, which is what it is for. The
+care is in not lying the other way: a search is only abandoned when the pool offered nobody at
+all, so losing a claim race waits for the next tick instead of announcing an empty room.
+
+**A typed interest is on screen before the server has answered, and restarts a running
+search.** Creating the shared row is what makes the tag matchable, but it is a round trip, and
+waiting for it meant pressing Enter and watching nothing happen. The tile goes up under a
+placeholder id -- negative, so it can never be sent anywhere -- and is swapped for the real row
+when it lands. Adding a word while the app is already looking asks the server again with it,
+rather than leaving it matching on the list it was given before the word existed.
+
+**The picker for the next conversation opens inside the chat, not over it.** It was a modal:
+a dimmed screen and a panel hiding the conversation that had just finished. It is now a band
+at the top of the same column, above the messages.
+
+**Leave is on the left of the chat header.** Leaving is the first half of finding somebody
+else, and the right-hand end of a header is the corner a thumb reaches last.
+
+**A request can be accepted from the conversation it was made in.** The button that would ask
+to keep someone becomes the one that answers them, and accepting there empties the header's
+requests menu and its count -- the button, the list and the badge are three readings of one
+list. The person being asked is also told in the thread, and by a toast: on a phone with a
+conversation open, the header carrying that badge is deliberately hidden, so the ask used to
+arrive invisibly.
+
+**Everything the app says lives in `web/lib/messages.ts`, and is short.** Seven or eight words.
+A pill in the middle of a conversation is a caption, not a paragraph: "Asked to keep them. You
+will hear back only if they say yes." said in thirteen words what four say.
 
 **Infrastructure and running it**
 

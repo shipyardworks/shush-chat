@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
 import type { ChatItem, Message } from "@/lib/types";
 import type { Peer } from "@/lib/useShush";
 import { Avatar } from "./Avatar";
@@ -17,6 +16,8 @@ export const ChatPanel = ({
   ended,
   historyLoading,
   friendRequestSent,
+  incomingRequest,
+  onAcceptRequest,
   searching,
   canFind,
   onFind,
@@ -47,6 +48,9 @@ export const ChatPanel = ({
   ended: boolean;
   historyLoading: boolean;
   friendRequestSent: boolean;
+  /** They asked to keep you first, so the same button answers instead of asking again. */
+  incomingRequest: boolean;
+  onAcceptRequest: () => void;
   /** A search is running -- the picker opened from an ended thread starts one straight away. */
   searching: boolean;
   /** At least one interest is chosen, so a search can start without asking anything first. */
@@ -114,7 +118,7 @@ export const ChatPanel = ({
   };
 
   // A new match closes it on its own -- there is nothing left to pick for once one has been
-  // found, and leaving it open would show the modal floating over somebody else's conversation.
+  // found, and leaving it open would sit a picker on top of the conversation it just opened.
   useEffect(() => {
     if (!ended) setPicking(false);
   }, [ended]);
@@ -168,6 +172,26 @@ export const ChatPanel = ({
             <Menu />
           </button>
         )}
+        {/* Leave sits here, at the near edge, and not out on the right with the other
+            actions. Leaving is the first half of finding somebody else, and on a phone the
+            right side of a header is the far corner from a thumb -- the two presses that end
+            one conversation and start the next should be next to each other, not at opposite
+            ends of the screen. */}
+        {!isFriendConversation && !ended && (
+          <button
+            id="leave"
+            type="button"
+            title="Leave"
+            aria-label="Leave"
+            className="btn-ghost flex h-9 flex-none items-center justify-center gap-1.5 rounded-full px-2.5 sm:px-3"
+            onClick={onLeave}
+          >
+            <svg viewBox="0 0 24 24" className="h-4 w-4 flex-none" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9" />
+            </svg>
+            <span className="hidden sm:inline">Leave</span>
+          </button>
+        )}
         <button id="chatAvatar" type="button" title="View profile" onClick={onOpenPeer}>
           <Avatar id={peer.userId} name={peer.name} />
         </button>
@@ -189,7 +213,8 @@ export const ChatPanel = ({
           </div>
         </button>
         <span className="flex-1" />
-        {/* Already friends means there is nothing left to ask for, and nothing to walk out of. */}
+        {/* Already friends means there is nothing left to ask for. Leave is drawn on the left,
+            beside the burger -- see the comment there. */}
         {!isFriendConversation && (
           <>
             {/* Still offered after somebody leaves: asking to keep them is the one thing a
@@ -200,37 +225,42 @@ export const ChatPanel = ({
                 the whole signal on a phone, and a greyed-out plus reads as "not available",
                 not as "you already did this" -- so the plus becomes a tick once the request
                 is out, the same way the words beside it change on a wider screen. */}
-            <button
-              id="addFriend"
-              type="button"
-              data-sent={friendRequestSent ? "true" : "false"}
-              title={friendRequestSent ? "Request sent" : "Add friend"}
-              aria-label={friendRequestSent ? "Request sent" : "Add friend"}
-              disabled={friendRequestSent}
-              className="btn-ghost flex h-9 flex-none items-center justify-center gap-1.5 rounded-full px-2.5 disabled:cursor-default disabled:opacity-100 sm:px-3.5"
-              style={friendRequestSent ? { color: "var(--color-brand)" } : undefined}
-              onClick={onAskToKeep}
-            >
-              {friendRequestSent ? (
-                <PersonCheck className="h-[18px] w-[18px]" />
-              ) : (
-                <PersonPlus className="h-[18px] w-[18px]" />
-              )}
-              <span className="hidden sm:inline">{friendRequestSent ? "Request sent" : "Add friend"}</span>
-            </button>
-            {!ended && (
+            {/* One control, three states, one drawing. Asking is a person with a plus; having
+                asked is the same person with a tick, disabled but not greyed, because a dimmed
+                control should mean the app is refusing rather than reporting. And when they
+                asked first, the same button answers them -- filled in, because accepting is
+                something to do rather than something that has happened. Accepting here empties
+                the header's requests menu too: both render from the same list. */}
+            {incomingRequest ? (
               <button
-                id="leave"
+                id="acceptRequest"
                 type="button"
-                title="Leave"
-                aria-label="Leave"
-                className="btn-ghost flex h-9 flex-none items-center justify-center gap-1.5 rounded-full px-2.5 sm:px-3.5"
-                onClick={onLeave}
+                title="Accept request"
+                aria-label="Accept request"
+                className="btn-primary flex h-9 flex-none items-center justify-center gap-1.5 rounded-full px-3 text-[14px] sm:px-3.5"
+                onClick={onAcceptRequest}
               >
-                <svg viewBox="0 0 24 24" className="h-4 w-4 flex-none" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9" />
-                </svg>
-                <span className="hidden sm:inline">Leave</span>
+                <PersonCheck className="h-[18px] w-[18px]" />
+                <span className="hidden sm:inline">Accept request</span>
+              </button>
+            ) : (
+              <button
+                id="addFriend"
+                type="button"
+                data-sent={friendRequestSent ? "true" : "false"}
+                title={friendRequestSent ? "Request sent" : "Add friend"}
+                aria-label={friendRequestSent ? "Request sent" : "Add friend"}
+                disabled={friendRequestSent}
+                className="btn-ghost flex h-9 flex-none items-center justify-center gap-1.5 rounded-full px-2.5 disabled:cursor-default disabled:opacity-100 sm:px-3.5"
+                style={friendRequestSent ? { color: "var(--color-brand)" } : undefined}
+                onClick={onAskToKeep}
+              >
+                {friendRequestSent ? (
+                  <PersonCheck className="h-[18px] w-[18px]" />
+                ) : (
+                  <PersonPlus className="h-[18px] w-[18px]" />
+                )}
+                <span className="hidden sm:inline">{friendRequestSent ? "Request sent" : "Add friend"}</span>
               </button>
             )}
           </>
@@ -238,6 +268,24 @@ export const ChatPanel = ({
       </div>
       </div>
       </div>
+
+      {/* The picker, in the conversation rather than over it.
+
+          It used to be a modal: a dimmed screen and a panel floating on top, which is a lot of
+          ceremony for "pick a word and press a button", and it hid the thread you had just
+          finished while you did. Sitting under the header it is the same three controls, in
+          the place the next conversation will appear, and the messages stay visible
+          underneath. It scrolls on its own so a long interest strip cannot push the
+          conversation off the screen. */}
+      {picking && (
+        <div
+          id="findSomewhereElse"
+          className="rise max-h-[62%] shrink-0 overflow-y-auto border-b px-3.5 py-3.5 sm:px-[22px]"
+          style={{ borderColor: "var(--color-line-soft)", backgroundColor: "var(--color-surface-2)" }}
+        >
+          {setupPanel(closePicker)}
+        </div>
+      )}
 
       <MessageList
         items={items}
@@ -285,9 +333,9 @@ export const ChatPanel = ({
         </div>
       )}
 
-      {ended ? (
+      {ended && picking ? null : ended ? (
         /* Only the way on. That it is over is said once, as a pill in the thread itself, and
-           the modal this opens is already searching -- one press, not two. */
+           the picker this opens is already searching -- one press, not two. */
         <div
           id="endedPanel"
           className="flex justify-center border-t px-5 py-3.5"
@@ -402,25 +450,6 @@ export const ChatPanel = ({
         </div>
       )}
 
-      {picking &&
-        createPortal(
-          <div
-            id="findSomeoneModal"
-            className="fixed inset-0 z-50 grid grid-cols-1 place-items-center overflow-y-auto p-3 backdrop-blur-[3px] sm:p-5"
-            style={{ backgroundColor: "var(--color-scrim)" }}
-            onClick={(event) => {
-              if (event.target === event.currentTarget) closePicker();
-            }}
-          >
-            {/* The close is drawn by the panel itself, beside its own first heading -- see
-                SetupPanel's `onClose`. It used to sit on a row of its own above it, which on a
-                phone is a whole empty band above a picker that is already tight for height. */}
-            <div role="dialog" aria-modal="true" className="panel rise w-full max-w-[620px] p-4 sm:p-7">
-              {setupPanel(closePicker)}
-            </div>
-          </div>,
-          document.body,
-        )}
     </div>
   );
 };

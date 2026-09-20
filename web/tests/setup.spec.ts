@@ -25,6 +25,11 @@ const matchThem = async (a: Page, b: Page) => {
   for (const page of [a, b]) {
     const tile = page.locator(`[data-interest-id="${id}"]`);
     if ((await tile.getAttribute("aria-pressed")) !== "true") await tile.click({ force: true });
+    // "Forever", because these tests are about what happens once two people are talking, not
+    // about how long the dial waits. Five seconds is a promise the server now keeps -- it ends
+    // the search and says nobody is around -- and under a loaded suite the second click can
+    // land after the first one's window has closed, which would fail as "matching is broken".
+    await page.getByRole("button", { name: "Forever" }).click();
   }
   await a.waitForTimeout(600);
   await a.locator("#findSomeone").click();
@@ -154,7 +159,9 @@ test("find someone turns into the search itself, and tapping it again stops it",
   await expect(page.locator("#findStatus")).toHaveCount(0);
 });
 
-test("find someone after a conversation ends is already looking", async ({ browser }) => {
+test("find someone after a conversation ends opens in the chat, already looking", async ({
+  browser,
+}) => {
   const alice = await arrive(browser);
   const bob = await arrive(browser);
   await matchThem(alice, bob);
@@ -162,13 +169,121 @@ test("find someone after a conversation ends is already looking", async ({ brows
   await expect(bob.locator("#findSomeoneNext")).toHaveText("Find someone");
   await bob.locator("#findSomeoneNext").click();
 
-  // One press: the picker opens on the search itself, not on a second "Find someone".
-  const modal = bob.locator("#findSomeoneModal");
-  await expect(modal.locator("#findSomeone")).toHaveAttribute("aria-busy", "true");
-  await expect(modal.locator("#interestTicker")).toBeVisible();
+  // In the conversation, not floating over it behind a dimmed screen: the picker is a band at
+  // the top of the same column, and the messages are still there underneath it.
+  const picker = bob.locator("#findSomewhereElse");
+  await expect(picker).toBeVisible();
+  await expect(bob.locator("#messages")).toBeVisible();
+  const band = (await picker.boundingBox())!;
+  const messages = (await bob.locator("#messages").boundingBox())!;
+  // Above the messages and in the same column, rather than floating over the middle of them.
+  expect(band.y).toBeLessThan(messages.y);
+  expect(band.y + band.height).toBeLessThan(messages.y + messages.height);
+
+  // One press: it opens on the search itself, not on a second "Find someone".
+  await expect(picker.locator("#findSomeone")).toHaveAttribute("aria-busy", "true");
+  await expect(picker.locator("#interestTicker")).toBeVisible();
   // The same button, and pressing it stops the search.
-  await modal.locator("#findSomeone").click();
-  await expect(modal.locator("#findSomeone")).toHaveText("Find someone");
+  await picker.locator("#findSomeone").click();
+  await expect(picker.locator("#findSomeone")).toHaveText("Find someone");
+});
+
+/**
+ * Five seconds means five seconds.
+ *
+ * <p>The dial used to govern only how we matched -- hold out for a shared interest, then take
+ * anyone -- so with nobody there at all it governed nothing, and the button span "Still
+ * looking" for as long as you cared to watch it. A setting the product cannot honour is worse
+ * than not offering one.
+ */
+test("a five-second search with nobody around ends itself and says so", async ({ browser }) => {
+  const page = await arrive(browser);
+  await expect(page.locator("[data-testid=interest]").first()).toBeVisible();
+  await page.locator("#addInterestInput").fill(`alone${Date.now()}`);
+  await page.locator("#addInterestInput").press("Enter");
+  await page.getByRole("button", { name: "5s" }).click();
+
+  const find = page.locator("#findSomeone");
+  await find.click();
+  await expect(find).toHaveAttribute("aria-busy", "true");
+
+  // Ends on its own, well inside the time the old build would still have been spinning.
+  await expect(find).toHaveAttribute("aria-busy", "false", { timeout: 15_000 });
+  await expect(find).toHaveText("Find someone");
+  await expect(page.locator("#findStatus")).toContainText("Nobody around");
+});
+
+/**
+ * A word typed into the box is on screen before the server has answered.
+ *
+ * <p>It used to wait for `POST /api/interests` to come back -- the row has to exist for the tag
+ * to be matchable at all -- so pressing Enter did nothing visible for however long the network
+ * took, which reads as the app deciding whether to accept the word. The request is held here
+ * to make that gap real and long.
+ */
+test("a typed interest appears immediately, before the server has answered", async ({
+  browser,
+}) => {
+  const page = await arrive(browser);
+  await expect(page.locator("[data-testid=interest]").first()).toBeVisible();
+
+  let release: () => void = () => {};
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await page.route("**/api/interests", async (route, request) => {
+    if (request.method() !== "POST") return route.continue();
+    await held;
+    return route.continue();
+  });
+
+  const tag = `instant${Date.now()}`;
+  await page.locator("#addInterestInput").fill(tag);
+  await page.locator("#addInterestInput").press("Enter");
+
+  // On screen, chosen, while the request is still in flight.
+  const tile = page.getByRole("button", { name: tag, exact: true });
+  await expect(tile).toBeVisible({ timeout: 2000 });
+  await expect(tile).toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator("#addInterestInput")).toHaveValue("");
+
+  release();
+  // And once the real row lands it is the same single tile, not a second one beside it.
+  await expect(page.getByRole("button", { name: tag, exact: true })).toHaveCount(1);
+});
+
+/**
+ * Adding a word mid-search asks again with it.
+ *
+ * <p>The proof has to be that the *server* heard: the only thing that can pair these two is a
+ * fresh `find` carrying a tag the first one did not have. Ann is already waiting on it when
+ * Ben adds it to a search he has already started.
+ */
+test("an interest added while looking restarts the search with it", async ({ browser }) => {
+  const ann = await arrive(browser);
+  const ben = await arrive(browser);
+  const tag = `midsearch${Date.now()}`;
+
+  for (const page of [ann, ben]) await freezeTicker(page);
+  await ann.locator("#addInterestInput").fill(tag);
+  await ann.locator("#addInterestInput").press("Enter");
+  await ann.getByRole("button", { name: "Forever" }).click();
+  await ann.locator("#findSomeone").click();
+  await expect(ann.locator("#findSomeone")).toHaveAttribute("aria-busy", "true");
+
+  // Ben starts looking for something else entirely, then types Ann's word without stopping.
+  const other = ben.locator("#interestTicker [data-testid=interest]").first();
+  await other.click({ force: true });
+  await ben.getByRole("button", { name: "Forever" }).click();
+  await ben.locator("#findSomeone").click();
+  await expect(ben.locator("#findSomeone")).toHaveAttribute("aria-busy", "true");
+
+  await ben.locator("#addInterestInput").fill(tag);
+  await ben.locator("#addInterestInput").press("Enter");
+
+  await expect(ann.locator("#chat")).toBeVisible();
+  await expect(ben.locator("#chat")).toBeVisible();
+  await expect(ben.locator("#chatSub")).toContainText(tag);
 });
 
 /**
@@ -270,7 +385,7 @@ test("an unsaved account gets one plain line and a button, not a form", async ({
   const page = await arrive(browser);
   // At the foot of the sidebar, where "Signed in" appears once it is saved.
   await expect(page.locator("#sidebar #saveStrip")).toBeVisible();
-  await expect(page.locator("#saveWarning")).toContainText("will be lost");
+  await expect(page.locator("#saveWarning")).toContainText("Lose this browser");
   await expect(page.locator("#email")).toHaveCount(0);
 
   await page.locator("#openSave").click();
@@ -385,4 +500,78 @@ test("a typed interest is lowercased as it is typed, and is the same row either 
   for (const page of [alice, bob]) {
     await expect(page.locator("#chatSub")).toContainText(`You both like ${tag}`);
   }
+});
+
+/**
+ * Taking the last interest off while looking stops the search on the server too.
+ *
+ * <p>The screen is the easy half. A searcher the server still holds, with nothing on screen
+ * saying so, is the one who gets handed to whoever asks next -- the same shape as the Stop
+ * that lost a race with its own find.
+ */
+test("removing the last interest while looking leaves nobody waiting", async ({ browser }) => {
+  const seeker = await arrive(browser);
+  const tag = `dropped${Date.now()}`;
+  await expect(seeker.locator("[data-testid=interest]").first()).toBeVisible();
+  await seeker.locator("#addInterestInput").fill(tag);
+  await seeker.locator("#addInterestInput").press("Enter");
+  await seeker.getByRole("button", { name: "Forever" }).click();
+
+  await seeker.locator("#findSomeone").click();
+  await expect(seeker.locator("#findSomeone")).toHaveAttribute("aria-busy", "true");
+
+  // The only interest they had, taken off mid-search.
+  await seeker.getByRole("button", { name: tag, exact: true }).click();
+  await expect(seeker.locator("#findSomeone")).toHaveAttribute("aria-busy", "false");
+
+  // Somebody else looking for anything at all must not be handed the ghost.
+  const other = await arrive(browser);
+  await freezeTicker(other);
+  await other.locator("#interestTicker [data-testid=interest]").first().click({ force: true });
+  await other.getByRole("button", { name: "5s" }).click();
+  await other.locator("#findSomeone").click();
+  await expect(other.locator("#findStatus")).toContainText("Nobody around", { timeout: 20_000 });
+  await expect(seeker.locator("#chat")).toHaveCount(0);
+});
+
+/**
+ * A word typed and then interrupted still exists.
+ *
+ * <p>Showing the tile before the server answers means there is a window where the row does
+ * not exist yet, and navigating away in that window aborts the request that was creating it.
+ * The first cut read that abort as the server refusing and deleted the tag -- so a reload at
+ * the wrong moment quietly removed a word that was on screen and chosen. The tile is kept,
+ * and the shared row is claimed on the next load or the next search, whichever comes first.
+ */
+test("a typed interest survives a reload that interrupts its creation", async ({ browser }) => {
+  const page = await arrive(browser);
+  await expect(page.locator("[data-testid=interest]").first()).toBeVisible();
+
+  // Slow enough that the reload below certainly lands while the create is still in the air.
+  await page.route("**/api/interests", async (route, request) => {
+    if (request.method() !== "POST") return route.continue();
+    await new Promise((resolve) => setTimeout(resolve, 4000));
+    return route.continue();
+  });
+
+  const tag = `interrupted${Date.now()}`;
+  await page.locator("#addInterestInput").fill(tag);
+  await page.locator("#addInterestInput").press("Enter");
+  await expect(page.getByRole("button", { name: tag, exact: true })).toBeVisible();
+
+  await page.reload();
+  await expect(page.locator("[data-testid=interest]").first()).toBeVisible();
+  await expect(page.getByRole("button", { name: tag, exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: tag, exact: true })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+
+  // And it is a real row by the time it has to be: searching claims anything still unclaimed,
+  // so the search actually starts rather than stopping on an empty interest list.
+  await page.unroute("**/api/interests");
+  await page.getByRole("button", { name: "Forever" }).click();
+  await page.locator("#findSomeone").click();
+  await expect(page.locator("#findSomeone")).toHaveAttribute("aria-busy", "true");
+  await expect(page.locator("#findSomeone")).toHaveAttribute("aria-busy", "true", { timeout: 3000 });
 });

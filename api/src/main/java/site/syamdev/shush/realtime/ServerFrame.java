@@ -19,6 +19,7 @@ import java.util.UUID;
         @JsonSubTypes.Type(value = ServerFrame.ReadReceipt.class, name = "read"),
         @JsonSubTypes.Type(value = ServerFrame.Left.class, name = "left"),
         @JsonSubTypes.Type(value = ServerFrame.Matched.class, name = "matched"),
+        @JsonSubTypes.Type(value = ServerFrame.NoMatch.class, name = "noMatch"),
         @JsonSubTypes.Type(value = ServerFrame.FriendRequested.class, name = "friendRequested"),
         @JsonSubTypes.Type(value = ServerFrame.FriendRequestAccepted.class, name = "friendRequestAccepted"),
         @JsonSubTypes.Type(value = ServerFrame.Reaction.class, name = "reaction"),
@@ -113,6 +114,15 @@ public sealed interface ServerFrame {
                    List<Short> sharedInterestIds,
                    boolean randomMatch) implements ServerFrame {
     }
+
+    /**
+     * The patience window ran out and there was nobody to pair with -- not even at random.
+     *
+     * <p>Carries nothing: there is no state to report, only the fact that the search the
+     * client is drawing is over. Without it a five-second dial could leave somebody watching
+     * "Still looking" for as long as they cared to, which makes the setting a lie.
+     */
+    record NoMatch() implements ServerFrame {}
 
     record FriendRequested(UUID conversationId, UUID requestId, UUID fromUserId) implements ServerFrame {}
 

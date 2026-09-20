@@ -52,6 +52,7 @@ public class MatchingService {
     private final Clock clock;
     private final Counter matchedOnInterests;
     private final Counter matchedAtRandom;
+    private final Counter gaveUp;
 
     MatchingService(WaitPool pool, WaitingIndex index, ConversationService conversations,
                     SocialGraph social, InterestService interests, UserRepository users,
@@ -68,6 +69,9 @@ public class MatchingService {
                 .description("conversations opened by matching").register(meters);
         this.matchedAtRandom = Counter.builder("shush.matches").tag("kind", "random")
                 .description("conversations opened by matching").register(meters);
+        this.gaveUp = Counter.builder("shush.matches.abandoned")
+                .description("searches ended because the patience window ran out with nobody there")
+                .register(meters);
     }
 
     /**
@@ -114,9 +118,41 @@ public class MatchingService {
         }
         if (waiting.patienceExpired(clock.instant())) {
             // The dial said "then give me anyone", and it meant it.
-            return matchAtRandom(waiting);
+            RandomAttempt atRandom = matchAtRandom(waiting);
+            if (atRandom.match().isPresent()) {
+                return atRandom.match();
+            }
+            // Only when there was genuinely nobody. Two matchers can expire in the same
+            // instant and reach for each other, and exactly one of them loses that claim --
+            // "nobody is around" is the wrong thing to tell the loser when the pool was full
+            // of people a millisecond ago. It waits for the next tick instead, half a second
+            // later, and gives up then if the pool really is empty.
+            //
+            // The other half of the same race: we may have been the one claimed, in which
+            // case a `matched` frame is already on its way and we are no longer waiting.
+            if (!atRandom.sawSomeone() && pool.isWaiting(waiting.userId())) {
+                giveUp(waiting.userId());
+            }
         }
         return Optional.empty();
+    }
+
+    /**
+     * Five seconds means five seconds, even when the answer is nobody.
+     *
+     * <p>The window used to govern only *how* we matched -- after it elapsed we stopped holding
+     * out for a shared interest and took anyone. With nobody at all in the pool that second
+     * branch found nothing either, and the searcher simply stayed in it: the button span "Still
+     * looking" indefinitely against a dial that had promised an answer in five seconds. A
+     * patience setting the product cannot honour is worse than not offering one, so the search
+     * ends and the person is told, which also puts the choice back in their hands -- press it
+     * again, pick differently, or wait it out with "Forever", which is the one setting that
+     * genuinely never gives up.
+     */
+    private void giveUp(UUID userId) {
+        cancel(userId);
+        gaveUp.increment();
+        backplane.publish(userId, new ServerFrame.NoMatch());
     }
 
     private Optional<Match> matchOnInterests(WaitingUser waiting) {
@@ -140,19 +176,28 @@ public class MatchingService {
         return pairUp(waiting.userId(), candidate.userId(), shared);
     }
 
-    private Optional<Match> matchAtRandom(WaitingUser waiting) {
+    private RandomAttempt matchAtRandom(WaitingUser waiting) {
         Set<UUID> excluded = excludedFor(waiting.userId());
+        boolean sawSomeone = false;
         for (UUID candidateId : pool.longestWaiting(FALLBACK_CANDIDATES)) {
             if (candidateId.equals(waiting.userId()) || excluded.contains(candidateId)) {
                 continue;
             }
+            sawSomeone = true;
             Optional<Match> match = pairUp(waiting.userId(), candidateId, null);
             if (match.isPresent()) {
-                return match;
+                return new RandomAttempt(match, true);
             }
         }
-        return Optional.empty();
+        return new RandomAttempt(Optional.empty(), sawSomeone);
     }
+
+    /**
+     * @param sawSomeone whether anyone was there to try for at all, which is a different
+     *                   thing from having matched: losing a claim race means somebody was
+     *                   there and somebody else got them
+     */
+    private record RandomAttempt(Optional<Match> match, boolean sawSomeone) {}
 
     /**
      * @param sharedInterests null when the patience window ran out and this is a random match --
@@ -204,10 +249,20 @@ public class MatchingService {
         });
     }
 
+    /**
+     * Blocks only. Friends are candidates like anybody else.
+     *
+     * <p>They used to be excluded, on the reading that somebody already in your friends list is
+     * someone you can message directly. The cost of that was not obvious until the pool was
+     * small: keep two or three people and the matcher starts refusing the only people who are
+     * ever around, with a screen that says nothing about why -- and once two accounts had kept
+     * each other, no amount of searching could ever put them together again. Being matched with
+     * a friend is a worse outcome than a stranger and a much better one than nobody, so the
+     * exclusion is gone and the conversation simply does not offer to keep someone already
+     * kept.
+     */
     private Set<UUID> excludedFor(UUID userId) {
-        Set<UUID> excluded = new LinkedHashSet<>(social.blockedEitherWay(userId));
-        excluded.addAll(social.friendIdsOf(userId));
-        return excluded;
+        return new LinkedHashSet<>(social.blockedEitherWay(userId));
     }
 
     /** @param sharedInterestIds null for a random match */

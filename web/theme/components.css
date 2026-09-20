@@ -179,3 +179,25 @@
     user-select: none;
   }
 }
+
+/*
+  A text field on a touch screen is never smaller than 16px.
+
+  Not a style choice: iOS Safari zooms the whole page in when a field is focused whose font is
+  under 16px, and it does not zoom back out afterwards. The body text here is 15px, so tapping
+  the message box scaled the layout up by a few percent and left it there -- which is why the
+  Leave and Add friend buttons ended up half off the right edge of the screen the moment
+  somebody started typing, with nothing on the page actually broken.
+
+  The alternative fix is `maximum-scale=1` on the viewport, which stops the zoom by taking
+  pinch-zoom away from everybody, including people who need it. Sizing the field correctly
+  costs one media query and takes nothing away. It applies to coarse pointers only, so a mouse
+  and keyboard keep the 15px the rest of the page is set in.
+*/
+@media (pointer: coarse) {
+  input,
+  textarea,
+  select {
+    font-size: 16px;
+  }
+}

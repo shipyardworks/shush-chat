@@ -9,24 +9,19 @@
  */
 
 /**
- * A person inside an envelope: requests waiting to be opened.
+ * A person with a small badge beside them: somebody is waiting on an answer.
  *
- * <p>A bare person said "people" and nothing about why it was a button. The obvious
- * alternatives each said the wrong thing: a bell is notifications in general, an inbox tray is
- * mail, and a person with a badge is a profile. An envelope with somebody in it is the one
- * shape that carries both halves of what this holds -- it is about a person, and it is waiting
- * for an answer -- in two strokes and a filled head, with nothing overlapping at 18px.
+ * <p>This was a person inside an envelope, which at 18px on a dark header was a shape nobody
+ * could read -- three overlapping forms in the space of a fingernail. It is now the same
+ * figure as {@link PersonPlus} and {@link PersonCheck}, with a filled dot where their plus and
+ * tick sit. That is the point: asking to keep someone, having asked, and being asked are three
+ * states of one idea, so they are one drawing with one mark changing.
  */
-export const PersonInbox = ({ className = "h-[18px] w-[18px]" }: { className?: string }) => (
-  <svg viewBox="0 0 24 24" className={`${className} flex-none`} fill="none" aria-hidden>
-    <circle cx="12" cy="7.1" r="2.9" fill="currentColor" />
-    <path d="M7.6 12.4c0-2.4 2-4 4.4-4s4.4 1.6 4.4 4Z" fill="currentColor" />
-    <path
-      d="M3.4 13.4h4.2l1.5 2.4h5.8l1.5-2.4h4.2v4.9a2 2 0 0 1-2 2H5.4a2 2 0 0 1-2-2Z"
-      stroke="currentColor"
-      strokeWidth="1.7"
-      strokeLinejoin="round"
-    />
+export const PersonRequests = ({ className = "h-[18px] w-[18px]" }: { className?: string }) => (
+  <svg viewBox="0 0 24 24" className={`${className} flex-none`} fill="currentColor" aria-hidden>
+    <circle cx="9.2" cy="7.6" r="4.3" />
+    <path d="M0.8 20.8c0-4.4 3.8-7.3 8.4-7.3s8.4 2.9 8.4 7.3Z" />
+    <circle cx="20.2" cy="13.4" r="3.4" />
   </svg>
 );
 

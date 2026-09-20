@@ -89,6 +89,11 @@ const pickTheSameTile = async (a: Page, b: Page) => {
   for (const page of [a, b]) {
     const tile = page.locator(`[data-interest-id="${id}"]`);
     if ((await tile.getAttribute("aria-pressed")) !== "true") await tile.click({ force: true });
+    // "Forever", so nothing in this file depends on how long a patience window is. These tests
+    // cut the connection and put it back, which takes as long as it takes; with the five-second
+    // dial the server would rightly give up mid-test and the failure would look like the
+    // reconnection being broken rather than the search having simply ended.
+    await page.getByRole("button", { name: "Forever" }).click();
   }
   await a.waitForTimeout(400);
 };

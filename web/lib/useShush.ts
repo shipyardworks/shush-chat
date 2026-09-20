@@ -1,10 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { api, setBearer } from "./api";
+import { ApiError, api, setBearer } from "./api";
 import { socketUrl } from "./config";
 import { newId } from "./ids";
 import { findByTag, normaliseTag } from "./interests";
+import { messages } from "./messages";
 import { dayKey, dayLabel } from "./time";
 import type {
   ChatItem,
@@ -138,6 +139,11 @@ export const useShush = () => {
   // Whether the live connection is actually up. Everything real-time rides on one socket, so
   // when it is down the app has to say so rather than accept presses it cannot deliver.
   const [connected, setConnected] = useState(false);
+  // Something worth looking up for, shown briefly over whatever is on screen. A request
+  // arriving is the only thing that raises one so far: the header that would have shown it is
+  // deliberately hidden while a conversation is open on a phone, so without this the only
+  // signal was a badge nobody could see.
+  const [toast, setToast] = useState<string | null>(null);
 
   const socket = useRef<WebSocket | null>(null);
   // The token this browser holds, kept so the socket can be rebuilt without signing in again.
@@ -171,6 +177,11 @@ export const useShush = () => {
   // Bumped by every find and every cancel. A find still waiting on its interests to save checks
   // it before sending, so a cancel pressed in that gap cannot be overtaken by the find it undid.
   const findAttempt = useRef(0);
+  // The selection as it is right now, not as it was when a callback was built. Restarting a
+  // live search has to send what is on screen at that instant, and state read from a closure
+  // is a render behind exactly when it matters -- the interest that caused the restart.
+  const selectedRef = useRef<number[]>([]);
+  const patienceRef = useRef(5);
   // The search that is still on screen, if any. Closing a socket drops that user from the
   // server's wait pool, so a reconnect has to put the search back rather than leave the button
   // spinning over a pool nobody is in.
@@ -195,6 +206,19 @@ export const useShush = () => {
   useEffect(() => {
     searchingRef.current = searching;
   }, [searching]);
+  useEffect(() => {
+    selectedRef.current = selected;
+  }, [selected]);
+  useEffect(() => {
+    patienceRef.current = patience;
+  }, [patience]);
+
+  /** A toast says one thing and goes. Four seconds is long enough to read six words. */
+  useEffect(() => {
+    if (!toast) return;
+    const timer = setTimeout(() => setToast(null), 4000);
+    return () => clearTimeout(timer);
+  }, [toast]);
 
   /** Re-run after every reconnect: assigned once the callbacks it needs exist. */
   const onReconnected = useRef<() => void>(() => {});
@@ -276,11 +300,15 @@ export const useShush = () => {
     }
   }, []);
 
-  const reloadRequests = useCallback(async () => {
+  /** @returns the reloaded list, so a caller can name whoever just asked. */
+  const reloadRequests = useCallback(async (): Promise<FriendRequest[]> => {
     try {
-      setRequests(await api.friendRequests());
+      const list = await api.friendRequests();
+      setRequests(list);
+      return list;
     } catch {
       /* as above */
+      return [];
     }
   }, []);
 
@@ -406,6 +434,12 @@ export const useShush = () => {
         // with an empty list is exactly the case this has to cover.
         const named = [...interests.all, ...interests.suggested, ...customInterestsRef.current];
         const labels = shared.map((id) => named.find((i) => i.id === id)?.label).filter(Boolean);
+        // Being matched with a friend is possible again -- the matcher no longer skips them --
+        // and when it happens, saying so is more use than repeating why. The header's ask-to-
+        // keep button is gone for the same reason: there is nothing left to ask.
+        const withFriend = friendsRef.current.some(
+          (friend) => friend.userId === String(frame.withUserId),
+        );
         openConversation(
           String(frame.conversationId),
           {
@@ -413,11 +447,13 @@ export const useShush = () => {
             name: (frame.withDisplayName as string | null) ?? null,
             // Their name heads the conversation; why you were put together is the subtitle.
             heading: (frame.withDisplayName as string | null) ?? "Someone",
-            sub: frame.randomMatch
-              ? "A random match — nobody sharing your interests was around"
-              : `You both like ${labels.join(" and ")}`,
+            sub: withFriend
+              ? messages.peer.alreadyFriends
+              : frame.randomMatch
+                ? messages.peer.randomMatch
+                : messages.peer.sharedInterests(labels as string[]),
           },
-          false,
+          withFriend,
         );
         void refreshLists();
         return;
@@ -541,11 +577,7 @@ export const useShush = () => {
       }
 
       if (type === "presence") {
-        appendEvent(
-          frame.online
-            ? "They are back."
-            : "They have gone offline. Anything you send will reach them when they return.",
-        );
+        appendEvent(frame.online ? messages.event.peerBack : messages.event.peerOffline);
         void refreshLists();
         return;
       }
@@ -559,21 +591,42 @@ export const useShush = () => {
         }
         setEnded(true);
         appendEvent(
-          String(frame.userId) === meRef.current
-            ? "You left. This conversation is over."
-            : "They have left. This conversation is over.",
+          String(frame.userId) === meRef.current ? messages.event.youLeft : messages.event.theyLeft,
         );
         void refreshLists();
         return;
       }
 
       if (type === "friendRequested") {
-        void reloadRequests();
+        // Said on this side too. The sender has always seen "Asked to keep them" in the
+        // thread; the person being asked saw a badge in a header that is deliberately hidden
+        // while a conversation is open on a phone -- so on the screen where it actually
+        // matters, the ask was invisible.
+        if (String(frame.conversationId) === conversationRef.current) {
+          appendEvent(messages.event.theyAsked);
+        }
+        // Named from the reloaded list rather than from whoever happens to be on screen: a
+        // request can arrive from an earlier conversation, and a toast naming the wrong
+        // person is worse than one naming nobody.
+        void reloadRequests().then((list) => {
+          const asked = list.find((request) => request.id === String(frame.requestId));
+          setToast(messages.requests.arrived(asked?.fromDisplayName ?? "Someone"));
+        });
+        return;
+      }
+
+      if (type === "noMatch") {
+        // The server gave up, so the button stops pretending. Both halves matter: the search
+        // is over on the server, and this screen is the only thing that can say so.
+        liveFind.current = null;
+        if (hintTimer.current) clearTimeout(hintTimer.current);
+        setSearching(false);
+        setFindStatus(messages.search.nobody);
         return;
       }
 
       if (type === "friendRequestAccepted") {
-        appendEvent("They kept you. They are in your friends list now.");
+        appendEvent(messages.event.nowFriends);
         void refreshLists();
         return;
       }
@@ -585,7 +638,7 @@ export const useShush = () => {
           // on a pending clock with nothing left to ever advance it.
           patchMessage({ clientMsgId }, (item) => ({ ...item, delivery: "failed" }));
         } else {
-          appendEvent(`Something went wrong: ${String(frame.message)}`);
+          appendEvent(messages.event.failed(String(frame.message)));
         }
       }
     },
@@ -659,7 +712,15 @@ export const useShush = () => {
         }
       }),
     );
+    // Anything typed while all of this was still running is kept. Signing in is several
+    // requests long, the interest tiles are on screen for most of it, and somebody typing a
+    // tag into a box the app is already showing should not have it quietly swallowed when the
+    // last of those requests comes back and writes the list it started with.
     const usableCustom = shared.filter((one): one is Interest => one !== null);
+    for (const typed of customInterestsRef.current) {
+      if (!findByTag(usableCustom, normaliseTag(typed.label))) usableCustom.push(typed);
+    }
+    customInterestsRef.current = usableCustom;
     rememberCustomInterests(usableCustom);
     setCustomInterests(usableCustom);
     // A typed tag is always selected -- there is no unselected-but-remembered state for one,
@@ -672,10 +733,12 @@ export const useShush = () => {
             ? catalogue.suggested.map((i) => i.id)
             : []),
         ...promoted,
+        ...selectedRef.current,
         ...usableCustom.map((interest) => interest.id),
       ]),
     ];
     setSelected(initial);
+    selectedRef.current = initial;
     rememberSelected(initial);
 
     jwt.current = next.jwt;
@@ -803,9 +866,9 @@ export const useShush = () => {
       if (thread.ended) {
         // Said once, in the thread, where the date pills are -- not as a line of text squeezed
         // in next to the button at the bottom.
-        appendEvent("This conversation is over.");
+        appendEvent(messages.event.over);
       } else if (!history.messages.length) {
-        appendEvent("Nothing here yet. Say something.");
+        appendEvent(messages.event.nothingYet);
       }
       const newest = history.messages[history.messages.length - 1];
       if (newest) {
@@ -843,32 +906,116 @@ export const useShush = () => {
 
   /* ---------- sending ---------- */
 
-  const findSomeone = useCallback(async () => {
+  /**
+   * Starts a search with exactly these interests -- or restarts one that is already running.
+   *
+   * <p>The ids are a parameter rather than read from state because this is also how a live
+   * search picks up a change: adding an interest mid-search has to send the word that was just
+   * typed, and state inside a callback is one render behind at that exact moment. Restarting
+   * also restarts the patience window, which is right -- a search with a different question in
+   * it is a different search.
+   */
+  /**
+   * Swaps a placeholder tile for the real row the server gave it -- or drops it.
+   *
+   * <p>Ref first, then state and storage from the ref, because the next thing to happen is
+   * usually a search that has to send the real id, and state is a render behind.
+   */
+  const resolvePlaceholder = useCallback((placeholderId: number, real: Interest | null) => {
+    customInterestsRef.current = real
+      ? customInterestsRef.current.map((one) => (one.id === placeholderId ? real : one))
+      : customInterestsRef.current.filter((one) => one.id !== placeholderId);
+    // Deduped by id: two placeholders for one word can only happen by racing, and the second
+    // one resolving to the same real row must not put it on screen twice.
+    customInterestsRef.current = customInterestsRef.current.filter(
+      (one, at) => customInterestsRef.current.findIndex((other) => other.id === one.id) === at,
+    );
+    setCustomInterests(customInterestsRef.current);
+    rememberCustomInterests(customInterestsRef.current);
+
+    selectedRef.current = [
+      ...new Set(
+        selectedRef.current.flatMap((id) => (id === placeholderId ? (real ? [real.id] : []) : [id])),
+      ),
+    ];
+    setSelected(selectedRef.current);
+    rememberSelected(selectedRef.current);
+  }, []);
+
+  /**
+   * Gives every tile still holding a placeholder id a real, shared row.
+   *
+   * <p>A typed tag matches nobody until it exists on the server, so this runs both when the
+   * word is typed and again before any search -- a claim that failed the first time gets
+   * another go at the moment it actually matters, rather than leaving a tile on screen that
+   * quietly cannot match.
+   *
+   * <p>Only a refusal removes it. A request that simply did not finish -- the page navigating
+   * away mid-flight is the ordinary case, and it aborts whatever was in the air -- leaves the
+   * tile alone and tries again later. Deleting somebody's word because their own reload
+   * cancelled the request that was saving it is the wrong way round.
+   */
+  const claimTypedTags = useCallback(async () => {
+    for (const pending of customInterestsRef.current.filter((one) => one.id < 0)) {
+      try {
+        resolvePlaceholder(pending.id, await api.createInterest(pending.label));
+      } catch (error) {
+        if (error instanceof ApiError && error.status >= 400 && error.status < 500) {
+          resolvePlaceholder(pending.id, null);
+        }
+      }
+    }
+  }, [resolvePlaceholder]);
+
+  /**
+   * Starts a search with whatever is currently selected -- or restarts one already running.
+   *
+   * <p>Reads the selection from the ref rather than from state or an argument, because this is
+   * also how a live search picks up a change: adding an interest mid-search has to send the
+   * word that was just typed, and state inside a callback is one render behind at that exact
+   * moment. Restarting also restarts the patience window, which is right -- a search with a
+   * different question in it is a different search.
+   */
+  const startFind = useCallback(async () => {
+    // A tile still holding a placeholder id has no row on the server and can match nobody.
+    // Claiming here, rather than only when it was typed, means a create that failed then gets
+    // another go at the one moment it matters.
+    await claimTypedTags();
+    // Every selected id is a real row now, typed tags included. A negative one left here is a
+    // claim that could not be made at all; the server would reject it rather than match on it.
+    const realIds = selectedRef.current.filter((id) => id > 0);
+    if (realIds.length === 0) {
+      // Nothing left to look for. Stopping the screen is not enough: the server is still
+      // holding this person in the wait pool, and a searcher nobody can see is one who gets
+      // handed to whoever asks next -- the same shape as the Stop that raced its own find.
+      if (searchingRef.current) {
+        findAttempt.current += 1;
+        liveFind.current = null;
+        send({ type: "cancelFind" });
+      }
+      setSearching(false);
+      return;
+    }
     setFindStatus("");
     setSearching(true);
-    // Every selected id is a real row now, typed tags included -- the filter stays only to
-    // drop a negative one left in this browser's storage by an older build, which would be
-    // rejected by the server rather than matched on.
-    const realIds = selected.filter((id) => id > 0);
     const attempt = ++findAttempt.current;
     await api.saveInterests(realIds);
     // Stopped while saving: sending now would put us back in the pool with the screen saying
     // we are not looking -- a searcher nobody can see, matched with whoever asks next.
     if (attempt !== findAttempt.current) return;
-    const frame = { type: "find", interestIds: realIds, patience };
+    const frame = { type: "find", interestIds: realIds, patience: patienceRef.current };
     liveFind.current = frame;
     send(frame);
     if (hintTimer.current) clearTimeout(hintTimer.current);
-    // Matching skips anyone already a friend, so with a few friends and nobody else waiting it
-    // looks exactly like a broken matcher. Say so rather than spin forever.
-    hintTimer.current = setTimeout(() => {
-      setFindStatus(
-        friendsRef.current.length
-          ? "Nobody new is around yet. Friends are skipped here, message them from your list."
-          : "Nobody with your interests is around yet.",
-      );
-    }, 12_000);
-  }, [patience, selected, send]);
+    // Only "Forever" gets a hint, and only as reassurance: every other setting now ends by
+    // itself with a `noMatch` frame, so a line here would either duplicate that or contradict
+    // it. This one has no end to wait for, by definition.
+    if (patienceRef.current === 0) {
+      hintTimer.current = setTimeout(() => setFindStatus(messages.search.holdingOn), 12_000);
+    }
+  }, [claimTypedTags, send]);
+
+  const findSomeone = useCallback(() => void startFind(), [startFind]);
 
   const cancelFind = useCallback(() => {
     findAttempt.current += 1;
@@ -1041,11 +1188,7 @@ export const useShush = () => {
     if (!conversationId || friendRequestSent) return;
     const response = await api.askToKeep(conversationId);
     if (response.ok) setFriendRequestSent(true);
-    appendEvent(
-      response.ok
-        ? "Asked to keep them. You will hear back only if they say yes."
-        : "You have already asked.",
-    );
+    appendEvent(response.ok ? messages.event.asked : messages.event.alreadyAsked);
   }, [appendEvent, conversationId, friendRequestSent]);
 
 
@@ -1126,11 +1269,34 @@ export const useShush = () => {
     window.location.reload();
   }, []);
 
-  /** Sets selection and remembers it in this browser in the same step, so the two never drift. */
-  const updateSelected = useCallback((next: number[]) => {
-    setSelected(next);
-    rememberSelected(next);
-  }, []);
+  /**
+   * Sets selection, remembers it in this browser, and -- if a search is running -- asks again
+   * with it.
+   *
+   * <p>The three belong together. Changing what you are looking for while the app is looking
+   * used to change only the screen: the server went on matching against the list it was handed
+   * when the button was pressed, so the interest just added could not match anyone until the
+   * search was stopped and started again, and nothing said so.
+   */
+  const updateSelected = useCallback(
+    (next: number[]) => {
+      setSelected(next);
+      selectedRef.current = next;
+      rememberSelected(next);
+      if (searchingRef.current) void startFind();
+    },
+    [startFind],
+  );
+
+  /** Same rule as the interests: a dial changed mid-search is a question changed mid-search. */
+  const choosePatience = useCallback(
+    (next: number) => {
+      setPatience(next);
+      patienceRef.current = next;
+      if (searchingRef.current) void startFind();
+    },
+    [startFind],
+  );
 
   /**
    * Adds a typed tag and selects it -- as a real, shared interest, created on the server.
@@ -1145,46 +1311,56 @@ export const useShush = () => {
    *
    * <p>`POST /api/interests` dedupes by slug, so both of them come back holding the same id.
    */
-  const addInterest = useCallback(async (label: string) => {
-    if (!label) return;
-    if (customInterestsRef.current.some((one) => normaliseTag(one.label) === normaliseTag(label))) {
-      return;
-    }
-    let interest: Interest;
-    try {
-      interest = await api.createInterest(label);
-    } catch {
-      // Offline, or the server said no. Adding it locally would put a tile on screen that can
-      // never match anyone and give no hint why, which is the bug this replaced.
-      return;
-    }
-    setCustomInterests((current) => {
-      if (current.some((one) => one.id === interest.id)) return current;
-      const next = [...current, interest];
-      rememberCustomInterests(next);
-      return next;
-    });
-    setSelected((selection) => {
-      if (selection.includes(interest.id)) return selection;
-      const next = [...selection, interest.id];
-      rememberSelected(next);
-      return next;
-    });
-  }, []);
+  const addInterest = useCallback(
+    async (label: string) => {
+      if (!label) return;
+      if (customInterestsRef.current.some((one) => normaliseTag(one.label) === normaliseTag(label))) {
+        return;
+      }
+
+      // The tile goes up now, before the round trip. Creating the shared row is what makes a
+      // typed tag matchable at all, but it is a request to a server, and waiting for it meant
+      // pressing Enter and watching nothing happen for as long as the network took -- which
+      // reads as the app deciding whether to accept the word. A placeholder id, negative so it
+      // can never collide with a real one and is filtered out of anything sent to the server,
+      // holds its place until the real id lands.
+      const placeholderId = -Date.now();
+      customInterestsRef.current = [...customInterestsRef.current, { id: placeholderId, label }];
+      setCustomInterests(customInterestsRef.current);
+      selectedRef.current = [...selectedRef.current, placeholderId];
+      setSelected(selectedRef.current);
+      // Remembered straight away, placeholder id and all. Waiting for the real id would mean a
+      // reload in the meantime -- or a request that never comes back -- silently losing a word
+      // that was already on screen and chosen. A negative id in storage is a case sign-in and
+      // every search already know: they claim the shared row for one.
+      rememberCustomInterests(customInterestsRef.current);
+      rememberSelected(selectedRef.current);
+
+      await claimTypedTags();
+
+      // Adding a word while the app is already looking asks again with it, rather than leaving
+      // the server matching on the list it was given before the word existed.
+      if (searchingRef.current) void startFind();
+    },
+    [claimTypedTags, startFind],
+  );
 
   /** The only way a local-only tag goes away: it has no unselected state to fall back to. */
-  const removeCustomInterest = useCallback((id: number) => {
-    setCustomInterests((current) => {
-      const next = current.filter((interest) => interest.id !== id);
-      rememberCustomInterests(next);
-      return next;
-    });
-    setSelected((current) => {
-      const next = current.filter((one) => one !== id);
-      rememberSelected(next);
-      return next;
-    });
-  }, []);
+  const removeCustomInterest = useCallback(
+    (id: number) => {
+      customInterestsRef.current = customInterestsRef.current.filter(
+        (interest) => interest.id !== id,
+      );
+      setCustomInterests(customInterestsRef.current);
+      rememberCustomInterests(customInterestsRef.current);
+
+      selectedRef.current = selectedRef.current.filter((one) => one !== id);
+      setSelected(selectedRef.current);
+      rememberSelected(selectedRef.current);
+      if (searchingRef.current) void startFind();
+    },
+    [startFind],
+  );
 
   const goHome = useCallback(() => {
     setView("setup");
@@ -1208,6 +1384,49 @@ export const useShush = () => {
     () => friends.find((friend) => friend.userId === peer.userId) ?? null,
     [friends, peer.userId],
   );
+
+  /**
+   * Their request to keep you, if the person you are talking to has sent one.
+   *
+   * <p>Matched on the person rather than on the conversation: two people who have talked more
+   * than once have more than one conversation id between them, and a request made in the
+   * earlier one is still a request from the person on screen.
+   */
+  const incomingRequest = useMemo(
+    () =>
+      requests.find(
+        (request) => peer.userId != null && request.fromUserId === peer.userId,
+      ) ?? null,
+    [requests, peer.userId],
+  );
+
+  /**
+   * Accepts it from the chat itself, which is where you are when it arrives.
+   *
+   * <p>The header button, the requests list and the badge are then all the same fact: accept
+   * here and the row is gone from the menu and the count with it, because all three render
+   * from `requests` and this reloads it.
+   */
+  const acceptIncoming = useCallback(async () => {
+    if (!incomingRequest) return;
+    const response = await api.acceptRequest(incomingRequest.id);
+    if (!response.ok) return;
+    appendEvent(messages.event.nowFriends);
+    // Requests as well as friends and chats: this is the list the header's badge counts, and
+    // leaving it alone left a "1" hanging over a request that had just been answered.
+    await Promise.all([reloadRequests(), refreshLists()]);
+  }, [appendEvent, incomingRequest, refreshLists, reloadRequests]);
+
+  /**
+   * Whether asking to keep this person is still a thing that makes sense.
+   *
+   * <p>The flag alone was set when a thread was opened from the friends list, and a match is
+   * not opened from a list -- so now that the matcher no longer skips friends, being paired
+   * with one offered "Add friend" for somebody already kept. Deciding it from the friends list
+   * instead answers the question being asked, which is about the two people rather than about
+   * which row was clicked.
+   */
+  const withAFriend = isFriendConversation || currentFriend !== null;
 
   /** The quoted message a reply points at, when it is on screen. */
   const quotedFor = useCallback(
@@ -1235,7 +1454,7 @@ export const useShush = () => {
     addInterest,
     removeCustomInterest,
     patience,
-    setPatience,
+    setPatience: choosePatience,
     findStatus,
     searching,
     cancelFind,
@@ -1246,7 +1465,10 @@ export const useShush = () => {
     friendRequestSent,
     peer,
     currentFriend,
-    isFriendConversation,
+    isFriendConversation: withAFriend,
+    incomingRequest,
+    acceptIncoming,
+    toast,
     replyingTo,
     setReplyingTo,
     attachment,

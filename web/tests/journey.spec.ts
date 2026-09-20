@@ -50,6 +50,11 @@ const matchThem = async (a: Page, b: Page) => {
   for (const page of [a, b]) {
     const tile = page.locator(`[data-interest-id="${id}"]`);
     if ((await tile.getAttribute("aria-pressed")) !== "true") await tile.click({ force: true });
+    // "Forever", because these tests are about what happens once two people are talking, not
+    // about how long the dial waits. Five seconds is a promise the server now keeps -- it ends
+    // the search and says nobody is around -- and under a loaded suite the second click can
+    // land after the first one's window has closed, which would fail as "matching is broken".
+    await page.getByRole("button", { name: "Forever" }).click();
   }
   await a.waitForTimeout(600);
   await a.locator("#findSomeone").click();
@@ -100,14 +105,15 @@ test("two people match on a shared interest, talk, and keep each other", async (
   await openRequests(bob);
   await expect(bob.locator("[data-testid=request]")).toBeVisible();
 
-  await bob.getByRole("button", { name: "Accept" }).click();
+  await bob.locator("#requestsPanel").getByRole("button", { name: "Accept" }).click();
   await bob.keyboard.press("Escape");
   await openTab(bob, "friends");
   await openTab(alice, "friends");
   await expect(bob.locator("[data-testid=friend]")).toBeVisible();
   await expect(alice.locator("[data-testid=friend]")).toBeVisible();
 
-  // The friends list is the only route back: matching refuses to pair existing friends.
+  // The friends list is the direct route back to them, whether or not matching happens to
+  // pair you again.
   await bob.locator("#home").click();
   await expect(bob.locator("#findSomeone")).toBeVisible();
   await openTab(bob, "friends");
@@ -118,6 +124,72 @@ test("two people match on a shared interest, talk, and keep each other", async (
     nodes.map((node) => Number((node as HTMLElement).dataset.seq)),
   );
   expect(seqs).toEqual([...seqs].sort((x, y) => x - y));
+});
+
+/**
+ * Friends are matchable, and a matched friend is not asked to be kept again.
+ *
+ * <p>Excluding them was defensible until the pool was small: keep two or three people and the
+ * matcher starts refusing the only people who are ever around, and once two accounts had kept
+ * each other nothing could put them together again. The button that would ask to keep someone
+ * already kept is simply not there, which is the whole cost of allowing it.
+ */
+test("two friends can be matched again, and are not asked to keep each other twice", async ({
+  browser,
+}) => {
+  const alice = await arrive(browser);
+  const bob = await arrive(browser);
+  await matchThem(alice, bob);
+
+  await alice.locator("#addFriend").click();
+  await openRequests(bob);
+  await bob.locator("#requestsPanel").getByRole("button", { name: "Accept" }).click();
+  await bob.keyboard.press("Escape");
+  await openTab(bob, "friends");
+  await expect(bob.locator("[data-testid=friend]")).toBeVisible();
+
+  // Both go back and look again. This pairing was impossible before.
+  await alice.locator("#home").click();
+  await bob.locator("#home").click();
+  await matchThem(alice, bob);
+
+  await expect(alice.locator("#chatSub")).toContainText(/already friends/i);
+  await expect(alice.locator("#addFriend")).toHaveCount(0);
+  await expect(bob.locator("#addFriend")).toHaveCount(0);
+});
+
+/**
+ * The ask is answered from the conversation it was made in.
+ *
+ * <p>Two halves. The button that would have asked becomes the one that answers -- there is no
+ * sense in offering "add friend" to somebody who has already asked you. And accepting there
+ * empties the header's menu and its count, because the button, the list and the badge are all
+ * the same fact read three ways.
+ */
+test("a request can be accepted from the chat, and the badge goes with it", async ({ browser }) => {
+  const alice = await arrive(browser);
+  const bob = await arrive(browser);
+  await matchThem(alice, bob);
+
+  await alice.locator("#addFriend").click();
+
+  // Bob is told where he is looking, rather than only in a header he may have scrolled past:
+  // a line in the thread, and a toast naming whoever asked -- on a phone with a conversation
+  // open, the header carrying that badge is hidden.
+  await expect(bob.locator("#messages")).toContainText(/asked to keep you/i);
+  const aliceName = (await alice.locator("[data-testid=myName]").textContent())!.trim();
+  await expect(bob.locator("#toast")).toContainText(aliceName);
+  await expect(bob.locator("[data-testid=requestCount]")).toHaveText("1");
+
+  // The same control, answering instead of asking.
+  await expect(bob.locator("#addFriend")).toHaveCount(0);
+  await expect(bob.locator("#acceptRequest")).toBeVisible();
+  await bob.locator("#acceptRequest").click();
+
+  await expect(bob.locator("[data-testid=requestCount]")).toHaveCount(0);
+  await expect(bob.locator("#acceptRequest")).toHaveCount(0);
+  await openTab(bob, "friends");
+  await expect(bob.locator("[data-testid=friend]")).toBeVisible();
 });
 
 test("an image reaches the other person and actually loads", async ({ browser }) => {
@@ -142,14 +214,16 @@ test("an image reaches the other person and actually loads", async ({ browser })
     .toBeGreaterThan(0);
 });
 
-test("unread counts, and removing a friend makes them matchable again", async ({ browser }) => {
+test("unread counts, and a removed friend is still someone you can be matched with", async ({
+  browser,
+}) => {
   const alice = await arrive(browser);
   const bob = await arrive(browser);
   await matchThem(alice, bob);
 
   await alice.locator("#addFriend").click();
   await openRequests(bob);
-  await bob.getByRole("button", { name: "Accept" }).click();
+  await bob.locator("#requestsPanel").getByRole("button", { name: "Accept" }).click();
   await bob.keyboard.press("Escape");
   await openTab(bob, "friends");
   await expect(bob.locator("[data-testid=friend]")).toBeVisible();
@@ -160,7 +234,8 @@ test("unread counts, and removing a friend makes them matchable again", async ({
   await alice.locator("#send").click();
   await expect(bob.locator("[data-testid=unread]")).toHaveText("1");
 
-  // Removing the friendship is the only way back to being matchable with that person.
+  // Removing the friendship ends the friendship and nothing else -- the thread stays, and so
+  // does the ability to be paired with them.
   await bob.locator("[data-testid=friend]").first().click();
   await bob.locator("#chatAvatar").click();
   await expect(bob.locator("#removeFriend")).toBeVisible();

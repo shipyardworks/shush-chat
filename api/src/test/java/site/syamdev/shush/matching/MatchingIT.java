@@ -218,6 +218,73 @@ class MatchingIT extends AbstractIT {
                 .untilAsserted(() -> assertThat(pool.isWaiting(alice.userId())).isFalse());
     }
 
+    /**
+     * The dial promises an answer in five seconds, so five seconds is when one arrives -- even
+     * when the answer is nobody.
+     *
+     * <p>Before this, the window governed only *how* we matched: after it elapsed we stopped
+     * holding out for a shared interest and took anyone. With an empty pool that found nothing
+     * either and the searcher simply stayed in it, watching "Still looking" against a setting
+     * that had said five seconds. A patience setting the product cannot honour is worse than
+     * not offering one.
+     */
+    @Test
+    void aSearchWithNobodyToFindEndsItselfWhenPatienceRunsOut() throws Exception {
+        TestUsers.Session alice = testUsers.newAnonymous();
+
+        try (WsClient aliceWs = WsClient.connect(port, alice.jwt())) {
+            aliceWs.await("hello");
+            find(aliceWs, List.of(MUSIC), 5);
+
+            aliceWs.await("noMatch");
+
+            assertThat(pool.isWaiting(alice.userId()))
+                    .as("giving up means leaving the pool, not just telling the client")
+                    .isFalse();
+        }
+    }
+
+    /**
+     * Friends are candidates like anybody else.
+     *
+     * <p>They used to be excluded, which was defensible until the pool was small: keep two or
+     * three people and the matcher starts refusing the only people who are ever around. Worse,
+     * it was one-way -- once two accounts had kept each other, nothing could ever put them
+     * together again. The conversation simply does not offer to keep someone already kept; see
+     * the web client, which decides that from the friends list rather than from a flag.
+     */
+    @Test
+    void twoPeopleWhoAreAlreadyFriendsCanStillBeMatched() throws Exception {
+        TestUsers.Session alice = testUsers.newAnonymous();
+        TestUsers.Session bob = testUsers.newAnonymous();
+
+        UUID conversationId = testUsers.createConversation(alice, bob);
+        JsonNode request = rest.exchange(
+                        "/api/conversations/" + conversationId + "/friend-request",
+                        org.springframework.http.HttpMethod.POST,
+                        new org.springframework.http.HttpEntity<>(null, testUsers.authorised(alice)),
+                        JsonNode.class)
+                .getBody();
+        rest.exchange("/api/friend-requests/" + request.path("id").asText() + "/accept",
+                org.springframework.http.HttpMethod.POST,
+                new org.springframework.http.HttpEntity<>(null, testUsers.authorised(bob)),
+                JsonNode.class);
+
+        try (WsClient aliceWs = WsClient.connect(port, alice.jwt());
+             WsClient bobWs = WsClient.connect(port, bob.jwt())) {
+            aliceWs.await("hello");
+            bobWs.await("hello");
+
+            find(aliceWs, List.of(GAMING), 0);
+            find(bobWs, List.of(GAMING), 0);
+
+            JsonNode asAlice = aliceWs.await("matched");
+            assertThat(asAlice.path("withUserId").asText()).isEqualTo(bob.userId().toString());
+            assertThat(bobWs.await("matched").path("withUserId").asText())
+                    .isEqualTo(alice.userId().toString());
+        }
+    }
+
     private static void find(WsClient client, List<Short> interestIds, int patience) throws Exception {
         String ids = interestIds.stream().map(String::valueOf).reduce((a, b) -> a + "," + b).orElse("");
         client.send("{\"type\":\"find\",\"interestIds\":[" + ids + "],\"patience\":" + patience + "}");

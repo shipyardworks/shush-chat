@@ -37,6 +37,11 @@ const matchThem = async (a: Page, b: Page) => {
   for (const page of [a, b]) {
     const tile = page.locator(`[data-interest-id="${id}"]`);
     if ((await tile.getAttribute("aria-pressed")) !== "true") await tile.click({ force: true });
+    // "Forever", because these tests are about what happens once two people are talking, not
+    // about how long the dial waits. Five seconds is a promise the server now keeps -- it ends
+    // the search and says nobody is around -- and under a loaded suite the second click can
+    // land after the first one's window has closed, which would fail as "matching is broken".
+    await page.getByRole("button", { name: "Forever" }).click();
   }
   await a.waitForTimeout(600);
   await a.locator("#findSomeone").click();
@@ -70,7 +75,7 @@ test("leaving reaches both people and closes the conversation", async ({ browser
 
   // The whole bug: one side was sure, the other was never told.
   await expect(alice.locator("#messages")).toContainText("You left");
-  await expect(bob.locator("#messages")).toContainText("They have left");
+  await expect(bob.locator("#messages")).toContainText("They left");
 
   // And it is over for both -- no composer to type into.
   for (const page of [alice, bob]) {
@@ -82,7 +87,7 @@ test("leaving reaches both people and closes the conversation", async ({ browser
   }
 });
 
-test("an ended conversation offers the way to the next one, as a modal over it", async ({
+test("an ended conversation offers the way to the next one, inside the conversation", async ({
   browser,
 }) => {
   const alice = await arrive(browser);
@@ -94,19 +99,21 @@ test("an ended conversation offers the way to the next one, as a modal over it",
   // Nothing but the fact and a button -- the picker itself is not here, so the ended thread
   // never grows a scrolling picker of its own the way it used to.
   await expect(bob.locator("#endedPanel [data-testid=interest]")).toHaveCount(0);
-  await expect(bob.locator("#findSomeoneModal")).toHaveCount(0);
+  await expect(bob.locator("#findSomewhereElse")).toHaveCount(0);
 
   // That it is over is said once, in the thread -- the footer is only the way on.
   await expect(bob.locator("#endedPanel")).not.toContainText("over");
-  await expect(bob.locator("#messages")).toContainText("This conversation is over");
+  await expect(bob.locator("#messages")).toContainText("They left.");
 
-  // One click opens it as a modal over the finished conversation, already searching; the
-  // thread is still there underneath, and closing the modal stops the search.
+  // One click opens the picker in the conversation, at the top of it, already searching --
+  // not a dimmed screen with a panel floating over the thread you just finished. Escape
+  // closes it and stops the search.
   await bob.locator("#findSomeoneNext").click();
-  await expect(bob.locator("#findSomeoneModal [data-testid=interest]").first()).toBeVisible();
-  await expect(bob.locator("#findSomeoneModal #findSomeone")).toHaveAttribute("aria-busy", "true");
+  await expect(bob.locator("#findSomewhereElse [data-testid=interest]").first()).toBeVisible();
+  await expect(bob.locator("#findSomewhereElse #findSomeone")).toHaveAttribute("aria-busy", "true");
+  await expect(bob.locator("#messages")).toBeVisible();
   await bob.keyboard.press("Escape");
-  await expect(bob.locator("#findSomeoneModal")).toHaveCount(0);
+  await expect(bob.locator("#findSomewhereElse")).toHaveCount(0);
   await expect(bob.locator("#endedPanel")).toBeVisible();
 });
 
@@ -142,7 +149,7 @@ test("an accepted friend is listed once, under Friends", async ({ browser }) => 
 
   await alice.locator("#addFriend").click();
   await openRequests(bob);
-  await bob.getByRole("button", { name: "Accept" }).click();
+  await bob.locator("#requestsPanel").getByRole("button", { name: "Accept" }).click();
   await bob.keyboard.press("Escape");
   await openTab(bob, "friends");
   await expect(bob.locator("[data-testid=friend]")).toHaveCount(1);

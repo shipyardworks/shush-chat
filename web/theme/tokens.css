@@ -50,16 +50,27 @@
     radial-gradient(800px 500px at 105% 0%, rgb(56 208 224 / 0.1), transparent 55%);
 }
 
+/*
+  Light mode is the same ladder as dark, not a separate palette: page behind, card in front,
+  controls on the card. It was drawn far too close together -- a #f4f5fa page under a white
+  panel is a difference of about two percent, so a card that is genuinely raised off the page
+  looked like a rectangle someone had outlined by hand, and every tile on it read as flat.
+  The page is now clearly a shade, the card stays white, and the lines are dark enough to
+  survive a phone screen outdoors.
+*/
 html[data-theme="light"] {
-  --color-ink: #f4f5fa;
+  --color-ink: #e6e9f3;
   --color-surface: #ffffff;
-  --color-surface-2: #f2f3f9;
-  --color-surface-3: #e7e9f2;
-  --color-line: #dfe2ee;
-  --color-line-soft: #eaecf4;
+  --color-surface-2: #f1f3fa;
+  --color-surface-3: #e2e6f2;
+  --color-line: #cfd5e6;
+  --color-line-soft: #dfe3ef;
   --color-body: #14161f;
-  --color-muted: #5c6478;
-  --color-faint: #8b93a7;
+  --color-muted: #545c72;
+  --color-faint: #767e94;
+  /* A dark-mode shadow on a light page is a smudge. Same lift, far less ink. */
+  --shadow-panel: 0 10px 28px rgb(19 24 56 / 0.10);
+  --shadow-brand: 0 6px 18px rgb(109 77 251 / 0.28);
   --backdrop-glow:
     radial-gradient(900px 500px at 12% -10%, rgb(124 92 255 / 0.12), transparent 60%),
     radial-gradient(800px 500px at 105% 0%, rgb(56 208 224 / 0.1), transparent 55%);

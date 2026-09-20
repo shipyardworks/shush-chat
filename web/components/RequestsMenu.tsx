@@ -3,8 +3,9 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { api } from "@/lib/api";
+import { messages } from "@/lib/messages";
 import type { FriendRequest } from "@/lib/types";
-import { PersonInbox } from "./icons";
+import { PersonRequests } from "./icons";
 
 /**
  * Pending friend requests, in the header rather than taking permanent space in the sidebar.
@@ -51,11 +52,12 @@ export const RequestsMenu = ({
 
   return (
     <>
-      {/* A person in an envelope, and beside it how many are waiting. The person alone was
-          just "people" -- it named who this is about without naming what the button does; the
-          envelope is the half that says something is sitting here for an answer. With none
-          waiting it is a quiet outline button like the theme toggle next to it; with any, it
-          fills in the brand colour so the number is impossible to miss. */}
+      {/* A person with a badge, and beside it how many are waiting -- the same figure the
+          chat header uses for "add friend" and "asked", with the mark changed. An envelope
+          with a person inside it was the right idea and the wrong drawing: at this size the
+          shapes ran into each other and it read as a smudge. With none waiting this is a quiet
+          outline button like the theme toggle next to it; with any, it fills in the brand
+          colour so the number is impossible to miss. */}
       <button
         ref={button}
         id="requestsButton"
@@ -74,7 +76,7 @@ export const RequestsMenu = ({
             : undefined
         }
       >
-        <PersonInbox />
+        <PersonRequests />
         {requests.length > 0 && (
           <span data-testid="requestCount" className="text-sm leading-none font-bold tabular-nums">
             {requests.length > 9 ? "9+" : requests.length}
@@ -104,7 +106,7 @@ export const RequestsMenu = ({
                     {/* Their name. "Someone would like to keep you" is a question nobody can
                         answer -- the app knows who it means and should say so. */}
                     <p className="m-0 text-[13px]">
-                      <strong>{request.fromDisplayName ?? "Someone"}</strong> would like to keep you.
+                      {messages.requests.wantsToKeepYou(request.fromDisplayName ?? "Someone")}
                     </p>
                     <div className="flex flex-wrap items-center gap-2">
                       <button
@@ -133,7 +135,7 @@ export const RequestsMenu = ({
               </ul>
               {requests.length === 0 && (
                 <p id="noRequests" className="px-1 text-[13px]" style={{ color: "var(--color-faint)" }}>
-                  Nobody has asked to keep you yet.
+                  {messages.requests.none}
                 </p>
               )}
             </div>

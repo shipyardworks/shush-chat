@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
+import { messages } from "@/lib/messages";
 
 /**
  * Pinned to the bottom of the sidebar for as long as the account lives only in this browser --
@@ -48,7 +49,7 @@ export const SaveAccount = ({
             <path d="M12 8.5v4M12 15.5h.01" />
           </svg>
           <p id="saveWarning" className="m-0 min-w-0 flex-1 text-xs leading-snug" style={{ color: "var(--color-muted)" }}>
-            Your chats and friends will be lost if you don&apos;t save your account.
+            {messages.account.warning}
           </p>
         </div>
         <button
@@ -85,7 +86,7 @@ export const SaveAccount = ({
                 Save your account
               </h2>
               <p className="mt-0 mb-4 text-[13px]" style={{ color: "var(--color-faint)" }}>
-                Keep your chats and friends, and sign in from any device.
+                {messages.account.why}
               </p>
               <div className="flex flex-col gap-2">
                 <input

@@ -47,9 +47,9 @@ under time pressure.
 
 | Suite | Count | Notes |
 | ----- | ----- | ----- |
-| Integration (`api`) | 188 | Real Postgres, Redis, Redpanda, Elasticsearch, MinIO via Testcontainers. Nothing mocked |
+| Integration (`api`) | 190 | Real Postgres, Redis, Redpanda, Elasticsearch, MinIO via Testcontainers. Nothing mocked |
 | Unit (`api`) | 9 | Pure logic only |
-| Browser (`web`, Playwright) | 72 | Journey, session, setup, layout, interactions and connection specs, against a stack that is already running |
+| Browser (`web`, Playwright) | 82 | Journey, session, setup, layout, interactions and connection specs, against a stack that is already running |
 | Harness self-tests (`bench`) | 17 | Each invariant fed a violating stream, asserted to report it |
 | Isolation (`platform`) | 5 checks | Cross-tenant access attempted with real credentials |
 
@@ -448,6 +448,91 @@ Guarded by `RetentionJobsIT#anImageInAnAnonymousConversationSurvivesTheNight`, b
 guarded it before: the window was a number in a yaml file no test ever read, driving the one
 sweep in this system that deletes a person's content on a timer.
 
+### Friends are matched like anybody else
+
+Matching excluded anyone already in your friends list, which was defensible while the pool was
+imagined to be large. It is not: keep two or three people and the matcher starts refusing the
+only people who are ever around, and the exclusion was permanent -- once two accounts had kept
+each other, nothing could put them together again. Unfriending was the only way out, which is a
+strange thing to have to do to somebody you like.
+
+`excludedFor` is now blocks only. The conversation itself is what changes: a matched friend
+gets "Already friends" as the subtitle and no ask-to-keep button, because there is nothing left
+to ask. The client decides that from the friends list rather than from the flag the thread was
+opened with -- a match is not opened from a list, so the flag was false for exactly the case
+that needed it.
+
+### A patience window that actually ends
+
+The dial promised an answer in five seconds and governed only *how* we matched: after it
+elapsed we stopped holding out for a shared interest and took anyone. With nobody in the pool
+that second branch found nothing either and the searcher simply stayed in it, watching "Still
+looking" for as long as they cared to. A setting the product cannot honour is worse than not
+offering one.
+
+`MatchingService` now gives up: it leaves the pool and sends a new `noMatch` frame, and the
+client puts the button back to "Find someone" with "Nobody around. Try again." underneath.
+`patience = 0` ("Forever") never gives up, which is the whole point of it.
+
+Two races had to be closed, and both are the same shape -- do not tell somebody nobody is
+around when somebody was. Giving up happens only when the pool offered no candidate at all: a
+lost claim means somebody *was* there and somebody else got them, so that waits for the next
+tick instead. And it is skipped entirely if this user is no longer in the pool, because that
+means they were the one claimed and a `matched` frame is already on its way.
+
+### The picker opens in the conversation, not over it
+
+"Find someone" from an ended thread opened a modal: a dimmed screen with a panel floating on
+it, hiding the conversation that had just finished. It is now a band at the top of the same
+column, above the messages, scrolling on its own. Same three controls, same one press to start
+searching, no second surface.
+
+### A typed interest appears before the server has confirmed it
+
+`addInterest` awaited `POST /api/interests` before putting anything on screen -- the row has to
+exist for the tag to be matchable, so the tile waited on a network round trip, and pressing
+Enter did nothing visible until it came back. It now goes up immediately under a negative
+placeholder id, which is swapped for the real one when it lands and removed if the request
+fails. Negative ids were already filtered out of everything sent to the server, so a
+placeholder cannot be matched on by accident.
+
+**Two things had to be true for that to be safe, and neither was in the first cut** (bug 44).
+The tile is written to `localStorage` the moment it appears, placeholder id and all, so a
+reload in the gap does not lose a word that is already on screen and chosen. And a create that
+does not finish leaves the tile alone rather than deleting it: navigating away aborts the
+request in flight, and reading that abort as "the server refused" is how a reload at the wrong
+moment quietly removed somebody's word. Only a 4xx removes it. Anything still holding a
+placeholder is claimed on the next load *and* before the next search, so a tag that could not
+be created when it was typed gets another go at the one moment it has to be real.
+
+A word typed while a search is running also restarts the search with it: changing what you are
+looking for used to change only the screen, leaving the server matching on the list it was
+handed when the button was pressed. Taking the last one off stops the search on the server too
+-- a searcher the server still holds with nothing on screen saying so is the one who gets
+handed to whoever asks next.
+
+### Every line the app says lives in `web/lib/messages.ts`
+
+The pills in a conversation, the search statuses, the request wording and the save-account
+warning were written where they were used, and had drifted into three lengths and three
+voices. They are one file now, and short: "Asked to keep them. You will hear back only if they
+say yes." said in thirteen words what four say. The rule is a sentence that can be read without
+stopping -- seven or eight words, because a pill in the middle of a conversation is a caption.
+
+### The request icon is a person and a badge
+
+An envelope with a person inside it was three shapes fighting for eighteen pixels, and read as
+a smudge. Asking to keep someone, having asked, and being asked are three states of one idea,
+so they are now one figure with one mark changing: a plus, a tick, a badge.
+
+### Leave is at the left of the chat, and a request can be accepted from it
+
+Leaving is the first half of finding somebody else, so the button moved from the far right of
+the header to the near edge, beside the burger. And when the other person has asked to keep
+you, the button that would ask them becomes the one that answers -- accepting there clears the
+header's menu and its count, because the button, the list and the badge are three readings of
+one list.
+
 ### `docs/SCHEMA.md` is generated
 
 Anticipated by the plan and now real: written by `SchemaDocIT` on every `./mvnw verify`,
@@ -505,6 +590,9 @@ Each was invisible to code review and would have shipped.
 | 41 | The check written for 3 could not fail. It looked for elements sticking out past the viewport and skipped any with a clipping ancestor -- and the `overflow-x: hidden` added to `body` in the same change made *every* element on the page have one, so the list was empty by construction | asking it to find a 3000px div, which it did not |
 | 42 | **The websocket was opened once and never reopened.** `WebSocket.send()` on a closed socket throws nothing and delivers nothing, so from the first disconnect onward every frame the app wrote -- `find`, `send`, `read`, `typing`, `leave` -- went into the floor, while the screen carried on looking exactly as it does when connected. HTTP kept working throughout, because fetch opens its own connection each time; that is what made it invisible, and what made it look like the matcher. Pressing Find wrote its `user_interests` row over HTTP and then sent the `find` frame nowhere, so the button spun on "Looking" against a server that had never heard of the search | the owner reporting that matching had stopped working at all, then the box: a selection written at 11:14:48 with no matching entry in either the Redis wait pool or the Elasticsearch index -- one half of one press landing and the other half missing |
 | 43 | The iOS long-press callout opened on top of the message menu. Holding a bubble is the app's own gesture; Safari's identical gesture selects the word under the finger and raises Copy \| Search with Google over it, and the app's menu is the one that gets dismissed | a phone screenshot, and now a test that reads `user-select` on the bubble and its text |
+| 44 | A typed interest was put on screen before the server confirmed it, and only remembered *after*. Worse, navigating away aborts the create in flight and the failure path read that as a refusal and deleted the tag -- so a reload at the wrong moment silently removed a word that was on screen and chosen. It failed only under load, which is exactly when the window is wide | the browser suite, intermittently; then reproduced on demand by holding the create for four seconds and reloading through it |
+| 45 | Accepting a request from inside the conversation left the header's badge showing "1". Friends and chats were reloaded; the requests list the badge counts was not | the test written for the new button |
+| 46 | Every text field was 15px, so iOS zoomed the page in on focus and never zoomed back -- which is why the header buttons ended up half off the right edge the moment somebody started typing, with nothing about the layout actually wrong | a phone screenshot |
 
 **42 is the same shape as 11, 20, 21, 33 and 34, and the worst of them.** Every one of those was
 a silent refusal -- a request the system dropped with nothing anywhere saying so. This one was a

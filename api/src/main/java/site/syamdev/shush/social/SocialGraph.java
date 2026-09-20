@@ -21,13 +21,6 @@ public class SocialGraph {
         this.blocks = blocks;
     }
 
-    @Transactional(readOnly = true)
-    public List<UUID> friendIdsOf(UUID userId) {
-        return friendships.findAllInvolving(userId).stream()
-                .map(friendship -> friendship.otherThan(userId))
-                .toList();
-    }
-
     /**
      * Blocking is one-directional but its effect on matching is not: being matched with someone
      * you blocked is as bad as being matched with someone who blocked you, and in the second

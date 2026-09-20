@@ -88,6 +88,11 @@ const matchThem = async (a: Page, b: Page) => {
   for (const page of [a, b]) {
     const tile = page.locator(`[data-interest-id="${id}"]`);
     if ((await tile.getAttribute("aria-pressed")) !== "true") await tile.click({ force: true });
+    // "Forever", because these tests are about what happens once two people are talking, not
+    // about how long the dial waits. Five seconds is a promise the server now keeps -- it ends
+    // the search and says nobody is around -- and under a loaded suite the second click can
+    // land after the first one's window has closed, which would fail as "matching is broken".
+    await page.getByRole("button", { name: "Forever" }).click();
   }
   await a.waitForTimeout(600);
   await a.locator("#findSomeone").click();
@@ -486,10 +491,12 @@ test("the requests and add-friend icons each say more than just person", async (
   await matchThem(alice, bob);
 
   const paths = (page: Page, id: string) => page.locator(`${id} svg path`).count();
-  expect(await alice.locator("#requestsButton svg circle").count()).toBe(1);
+  // One person in each, drawn the same way: a head, a body, and one mark that says which of
+  // the three things this is. Requests carries its mark as a second circle, add-friend as a
+  // plus. The envelope this replaced was three shapes fighting for eighteen pixels.
+  expect(await alice.locator("#requestsButton svg circle").count(), "a head and a badge").toBe(2);
   expect(await alice.locator("#addFriend svg circle").count()).toBe(1);
-  // A head plus a body is two paths at most; anything beyond that is the part that adds meaning.
-  expect(await paths(alice, "#requestsButton"), "an envelope around the person").toBeGreaterThan(1);
+  expect(await paths(alice, "#requestsButton"), "the person's body").toBe(1);
   expect(await paths(alice, "#addFriend"), "a plus beside the person").toBeGreaterThan(1);
 
   const requests = await alice.locator("#requestsButton svg").innerHTML();
@@ -596,7 +603,7 @@ test("the picker's close button sits on the heading's own line", async ({ browse
   await alice.locator("#leave").click();
   await bob.locator("#findSomeoneNext").click();
 
-  const modal = bob.locator("#findSomeoneModal");
+  const modal = bob.locator("#findSomewhereElse");
   await expect(modal).toBeVisible();
   const close = (await modal.locator("#closePicker").boundingBox())!;
   const heading = (await modal.getByText("What are you into?").boundingBox())!;
@@ -734,4 +741,84 @@ test("a photo that fails for any other reason does not claim to have expired", a
   const fallback = bob.locator("[data-testid=imageFallback]");
   await expect(fallback).toBeVisible();
   await expect(fallback).toHaveText(/unavailable/i);
+});
+
+/**
+ * Leave is at the near edge of the conversation, not out in the far corner.
+ *
+ * <p>Leaving is the first half of finding somebody else, and the two presses that end one
+ * conversation and start the next should be next to each other. On a phone the right-hand end
+ * of a header is the corner a thumb reaches last.
+ */
+test("leave sits at the left of the chat, before the name", async ({ browser }) => {
+  const alice = await arriveOnPhone(browser);
+  const bob = await arriveOnPhone(browser);
+  await matchThem(alice, bob);
+
+  const leave = (await alice.locator("#leave").boundingBox())!;
+  const avatar = (await alice.locator("#chatAvatar").boundingBox())!;
+  const addFriend = (await alice.locator("#addFriend").boundingBox())!;
+
+  expect(leave.x + leave.width).toBeLessThanOrEqual(avatar.x + 1);
+  expect(leave.x).toBeLessThan(addFriend.x);
+  // And it is still gone once the conversation is over -- there is nothing left to leave.
+  await alice.locator("#leave").click();
+  await expect(alice.locator("#leave")).toHaveCount(0);
+});
+
+/**
+ * A text field on a phone is 16px, and the page therefore does not zoom when one is focused.
+ *
+ * <p>iOS Safari scales the whole page up when a field smaller than that takes focus, and does
+ * not scale back afterwards -- which is why the header buttons ended up half off the right
+ * edge the moment somebody started typing, with nothing about the layout actually wrong. The
+ * body text here is 15px, so every field has to say otherwise for itself.
+ */
+test("a phone's text fields are big enough not to trigger a zoom", async ({ browser }) => {
+  const alice = await arriveOnPhone(browser);
+  const bob = await arriveOnPhone(browser);
+
+  const size = (page: Page, selector: string) =>
+    page.locator(selector).evaluate((node) => parseFloat(getComputedStyle(node).fontSize));
+
+  expect(await size(alice, "#addInterestInput")).toBeGreaterThanOrEqual(16);
+
+  await matchThem(alice, bob);
+  expect(await size(alice, "#composer")).toBeGreaterThanOrEqual(16);
+
+  // Focusing it changes nothing about the width of the page, which is what a zoom would.
+  const before = await alice.evaluate(() => document.documentElement.clientWidth);
+  await alice.locator("#composer").tap();
+  await alice.locator("#composer").fill("hi");
+  expect(await alice.evaluate(() => document.documentElement.clientWidth)).toBe(before);
+});
+
+/**
+ * Light mode has a page, a card on it, and controls on the card -- three steps you can see.
+ *
+ * <p>It was drawn at about two percent between the page and the panel, so a card that is
+ * genuinely raised off the page read as a hand-drawn rectangle and every tile on it looked
+ * flat. Luminance rather than any particular colour: the rule is that the steps exist.
+ */
+test("light mode separates the page, the panel and the controls", async ({ browser }) => {
+  const page = await arrive(browser);
+  await page.locator("#themeToggle").click();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+
+  // Chrome reports a color-mix() background as `color(srgb 1 1 1 / 0.92)` -- components on a
+  // 0-1 scale -- and a plain one as `rgb(230, 233, 243)`. Both are read here, because getting
+  // that wrong reports a white panel as almost black and the test then "passes" on nonsense.
+  const luminance = async (selector: string) =>
+    page.locator(selector).evaluate((node) => {
+      const parts = getComputedStyle(node).backgroundColor.match(/[\d.]+/g)!.slice(0, 3).map(Number);
+      const [r, g, b] = parts.every((one) => one <= 1) ? parts.map((one) => one * 255) : parts;
+      return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+    });
+
+  const body = await luminance("body");
+  const panel = await luminance(".panel");
+  const tile = await luminance("#interestTicker [data-testid=interest] >> nth=0");
+
+  expect(panel, "the card is lighter than the page it sits on").toBeGreaterThan(body + 0.02);
+  expect(tile, "and a control on the card is darker than the card").toBeLessThan(panel - 0.01);
 });

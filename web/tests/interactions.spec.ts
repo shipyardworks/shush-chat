@@ -46,6 +46,11 @@ const matchThem = async (a: Page, b: Page) => {
   for (const page of [a, b]) {
     const tile = page.locator(`[data-interest-id="${id}"]`);
     if ((await tile.getAttribute("aria-pressed")) !== "true") await tile.click({ force: true });
+    // "Forever", because these tests are about what happens once two people are talking, not
+    // about how long the dial waits. Five seconds is a promise the server now keeps -- it ends
+    // the search and says nobody is around -- and under a loaded suite the second click can
+    // land after the first one's window has closed, which would fail as "matching is broken".
+    await page.getByRole("button", { name: "Forever" }).click();
   }
   await a.waitForTimeout(600);
   await a.locator("#findSomeone").click();
@@ -310,7 +315,7 @@ test("removing a friend leaves them in the chat list", async ({ browser }) => {
 
   await alice.locator("#addFriend").click();
   await openRequests(bob);
-  await bob.getByRole("button", { name: "Accept" }).click();
+  await bob.locator("#requestsPanel").getByRole("button", { name: "Accept" }).click();
   await bob.keyboard.press("Escape");
   await openTab(bob, "friends");
   await expect(bob.locator("[data-testid=friend]")).toHaveCount(1);
