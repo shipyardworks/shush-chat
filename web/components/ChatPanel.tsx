@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ChatItem, Message } from "@/lib/types";
 import type { Peer } from "@/lib/useShush";
+import { messages as copy } from "@/lib/messages";
 import { Avatar } from "./Avatar";
 import { createPortal } from "react-dom";
 import { Menu, PersonCheck, PersonPlus } from "./icons";
-import { MessageList } from "./MessageList";
+import { MessageList, type Room } from "./MessageList";
 
 export const ChatPanel = ({
   peer,
@@ -81,16 +82,54 @@ export const ChatPanel = ({
   const [draft, setDraft] = useState("");
   const [picking, setPicking] = useState(false);
   /**
-   * Phone only: the name bar slides shut while the conversation is scrolled down and comes
-   * back the moment it is scrolled up, which is what every phone chat app does with it. A
-   * header is worth its ~58px when you arrive and worth nothing while you are reading.
-   * `.chat-head` (components.css) holds the breakpoint, so sm and up never collapses.
+   * Phone only: the name bar gets out of the way once the conversation needs the room. A
+   * header is worth its ~58px while there is space going spare and worth nothing the moment
+   * the messages would rather have it. `.chat-head` (components.css) holds the breakpoint, so
+   * sm and up never collapses -- the flag can still be set there, it simply does nothing.
    */
   const [headCollapsed, setHeadCollapsed] = useState(false);
-  /** Briefly true after a request lands, so the bar that just opened is noticed. */
+  /** Briefly true after a request lands, so the bar that answers it is on screen to be used. */
   const [announcing, setAnnouncing] = useState(false);
+  const [room, setRoom] = useState<Room>({ content: 0, view: 0, atTop: true });
   const file = useRef<HTMLInputElement>(null);
   const composer = useRef<HTMLTextAreaElement>(null);
+  const headRow = useRef<HTMLDivElement>(null);
+
+  // Identity matters: a new object every scroll event would restart the effect below on each
+  // one. Only a real change is worth a render.
+  const onRoom = useCallback((next: Room) => {
+    setRoom((current) =>
+      current.content === next.content && current.view === next.view && current.atTop === next.atTop
+        ? current
+        : next,
+    );
+  }, []);
+
+  /**
+   * The header goes up when the conversation outgrows the space it has, and not before.
+   *
+   * <p>It used to watch which way the reader was scrolling, which meant the header only left
+   * once somebody dragged it away -- so a conversation that had plainly run out of room kept a
+   * name bar on top of it until it was scrolled, and scrolling back up brought it down over
+   * the messages again. Space is the thing that actually changed, so space is what this reads.
+   *
+   * <p>The comparison is always against the room there would be <em>with the header open</em>,
+   * which is what stops the obvious oscillation: collapsing hands this list the header's own
+   * height, and measuring the result would say it fits, which would reopen it, which would
+   * take that height away again. Subtracting the header back out asks one question in both
+   * states, so the answer cannot flip between them.
+   */
+  useLayoutEffect(() => {
+    // Being asked overrides it: the bar carrying the button is no use behind the messages.
+    // So does the top of the conversation, where there is nothing above to make room for --
+    // one fixed point rather than a direction, so it cannot flap.
+    if (announcing || room.atTop) {
+      setHeadCollapsed(false);
+      return;
+    }
+    const head = headRow.current?.offsetHeight ?? 0;
+    setHeadCollapsed((collapsed) => room.content > (collapsed ? room.view - head : room.view) + 4);
+  }, [announcing, room]);
 
   const submit = () => {
     onSend(draft);
@@ -107,8 +146,8 @@ export const ChatPanel = ({
   }, [draft]);
 
   /**
-   * "Find someone" means find someone: the picker opens already searching with what you picked
-   * last time, instead of opening on a second "Find someone" to press. Closing it stops the
+   * Start chatting means start chatting: the picker opens already searching with what you
+   * picked last time, instead of opening on a second button to press. Closing it stops the
    * search -- walking away from the picker is walking away from the search it is showing.
    */
   const findNext = () => {
@@ -142,20 +181,24 @@ export const ChatPanel = ({
   }, [peer.userId]);
 
   /**
-   * A request arriving brings the name bar back down, and marks it for a moment.
+   * A request arriving brings the name bar back down for a few seconds.
    *
    * <p>This is the whole of how being asked is announced on a phone. The app header holding
-   * the requests badge is hidden while a conversation is open, and the chat header is
-   * scrolled shut by the time anyone has said anything -- so the only place the ask can
-   * appear is the bar that carries the button answering it, which means opening that bar.
-   * A toast was tried here first and was the wrong thing twice over: it covered the
-   * conversation, and it went away again while the button it was about stayed hidden.
+   * the requests badge is hidden while a conversation is open, and the chat header is out of
+   * the way by the time anyone has said anything -- so the only place the ask can appear is
+   * the bar that carries the button answering it, which means opening that bar. A toast was
+   * tried here first and was the wrong thing twice over: it covered the conversation, and it
+   * went away again while the button it was about stayed hidden.
+   *
+   * <p>It opens and nothing more. The bar used to pulse the brand colour behind itself while
+   * it was up, which is a second announcement of the same thing and reads as something being
+   * wrong; a header that was not there a moment ago, with "Accept request" in it, is already
+   * the loudest thing on the screen.
    */
   useEffect(() => {
     if (!incomingRequest) return;
-    setHeadCollapsed(false);
     setAnnouncing(true);
-    const timer = setTimeout(() => setAnnouncing(false), 4000);
+    const timer = setTimeout(() => setAnnouncing(false), 3000);
     return () => clearTimeout(timer);
   }, [incomingRequest]);
 
@@ -178,6 +221,7 @@ export const ChatPanel = ({
           plus border -- collapsing it directly left a 29px strip that would not close. */}
       <div>
       <div
+        ref={headRow}
         className="chat-head-row flex items-center gap-2 border-b px-3.5 py-3.5 sm:gap-3 sm:px-[22px]"
         style={{ borderColor: "var(--color-line-soft)" }}
       >
@@ -287,7 +331,7 @@ export const ChatPanel = ({
         onHideForMe={onHideForMe}
         onOpenImage={onOpenImage}
         onBackgroundTap={() => composer.current?.blur()}
-        onScrollDirection={setHeadCollapsed}
+        onRoom={onRoom}
       />
 
       {replyingTo && (
@@ -333,7 +377,7 @@ export const ChatPanel = ({
             className="btn-primary min-w-[190px]"
             onClick={findNext}
           >
-            Find someone
+            {copy.action.find}
           </button>
         </div>
       ) : (
@@ -366,38 +410,38 @@ export const ChatPanel = ({
               press away from whatever you were doing, next to the other thing you can do to a
               conversation -- and the two never both appear, so it costs one button's width.
 
-              "Switch" rather than "Leave", which said what happens to this conversation
-              instead of what you actually want, and rather than "Skip", which is the word the
-              obvious competitor's button uses. In a friend's conversation there is nothing to
-              leave, so the same slot is the way to a new stranger -- the thing a friend's
-              thread had no way to reach at all on a phone. */}
+              "Skip", which is what this is and what everything else that does it is called.
+              "Leave" said what happens to the conversation rather than what anyone wants, and
+              "Switch" left people asking what was being switched. In a friend's conversation
+              there is nothing to skip, so the same slot is the way to a new stranger -- the
+              thing a friend's thread had no way to reach at all on a phone. */}
           {isFriendConversation ? (
             <button
               id="findFromChat"
               type="button"
-              title="Find someone new"
-              aria-label="Find someone new"
+              title={copy.action.findNew}
+              aria-label={copy.action.findNew}
               className="btn-ghost flex h-10 flex-none items-center justify-center gap-1.5 self-end rounded-full px-2.5 sm:px-3.5"
               onClick={findNext}
             >
               <svg viewBox="0 0 24 24" className="h-[18px] w-[18px] flex-none" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M3 8h14l-4-4M21 16H7l4 4" />
               </svg>
-              <span className="hidden text-[14px] sm:inline">Find someone</span>
+              <span className="hidden text-[14px] sm:inline">{copy.action.find}</span>
             </button>
           ) : (
             <button
               id="leave"
               type="button"
-              title="Switch to someone else"
-              aria-label="Switch to someone else"
+              title={copy.action.skipTitle}
+              aria-label={copy.action.skipTitle}
               className="btn-ghost flex h-10 flex-none items-center justify-center gap-1.5 self-end rounded-full px-2.5 sm:px-3.5"
               onClick={onLeave}
             >
               <svg viewBox="0 0 24 24" className="h-[18px] w-[18px] flex-none" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9" />
               </svg>
-              <span className="hidden text-[14px] sm:inline">Switch</span>
+              <span className="hidden text-[14px] sm:inline">{copy.action.skip}</span>
             </button>
           )}
           <div className="field composer flex min-w-0 flex-1 items-end gap-0.5 rounded-[22px] py-0 pr-1 pl-4">
@@ -483,8 +527,8 @@ export const ChatPanel = ({
 
           It was tried as a band inside the chat, above the messages, and the band is worse at
           the only thing it has to do: it is a second, differently-shaped version of a panel
-          this app already has, so "find someone" looked like one thing from the start screen
-          and another from a finished conversation. Same panel, same width, same padding,
+          this app already has, so starting a conversation looked like one thing from the start
+          screen and another from a finished one. Same panel, same width, same padding,
           wherever it is opened from. */}
       {picking &&
         createPortal(

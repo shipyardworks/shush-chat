@@ -128,7 +128,7 @@ test("on a phone the interests are the same one-line strip, swiped with one fing
   await expect(page.locator(`#interestTicker [data-interest-id="${id}"]`)).toHaveCount(0);
 });
 
-test("find someone turns into the search itself, and tapping it again stops it", async ({ browser }) => {
+test("the start button turns into the search itself, and tapping it again stops it", async ({ browser }) => {
   const page = await arrive(browser);
   await pickUniqueTag(page);
   const find = page.locator("#findSomeone");
@@ -155,18 +155,18 @@ test("find someone turns into the search itself, and tapping it again stops it",
 
   await find.click();
   await expect(find).toHaveAttribute("aria-busy", "false");
-  await expect(find).toHaveText("Find someone");
+  await expect(find).toHaveText("Start chatting");
   await expect(page.locator("#findStatus")).toHaveCount(0);
 });
 
-test("find someone after a conversation ends opens the picker the start screen shows", async ({
+test("starting a chat after one ends opens the picker the start screen shows", async ({
   browser,
 }) => {
   const alice = await arrive(browser);
   const bob = await arrive(browser);
   await matchThem(alice, bob);
   await alice.locator("#leave").click();
-  await expect(bob.locator("#findSomeoneNext")).toHaveText("Find someone");
+  await expect(bob.locator("#findSomeoneNext")).toHaveText("Start chatting");
 
   // Somebody sitting on the start screen, so the panel there and the panel here can be
   // measured against each other: one picker, one shape, wherever it is opened from.
@@ -179,12 +179,12 @@ test("find someone after a conversation ends opens the picker the start screen s
   const inModal = (await picker.locator("#interestTiles").boundingBox())!;
   expect(Math.abs(inModal.width - onStart.width), "the same panel, not a second one").toBeLessThan(2);
 
-  // One press: it opens on the search itself, not on a second "Find someone".
+  // One press: it opens on the search itself, not on a second button to find.
   await expect(picker.locator("#findSomeone")).toHaveAttribute("aria-busy", "true");
   await expect(picker.locator("#interestTicker")).toBeVisible();
   // The same button, and pressing it stops the search.
   await picker.locator("#findSomeone").click();
-  await expect(picker.locator("#findSomeone")).toHaveText("Find someone");
+  await expect(picker.locator("#findSomeone")).toHaveText("Start chatting");
 });
 
 /**
@@ -208,7 +208,7 @@ test("a five-second search with nobody around ends itself and says so", async ({
 
   // Ends on its own, well inside the time the old build would still have been spinning.
   await expect(find).toHaveAttribute("aria-busy", "false", { timeout: 15_000 });
-  await expect(find).toHaveText("Find someone");
+  await expect(find).toHaveText("Start chatting");
   await expect(page.locator("#findStatus")).toContainText("Nobody around");
 });
 
@@ -287,9 +287,9 @@ test("an interest added while looking restarts the search with it", async ({ bro
 
 /**
  * The list of people you have talked to is a list, not a place to start a new conversation
- * from. "Find someone" sat above both tabs whether or not either had anything in it, and the
- * two ways on -- the logo, and the button an ended conversation already offers -- both land on
- * the same screen, already holding what was picked last time.
+ * from. The button sat above both tabs whether or not either had anything in it, and the two
+ * ways on -- the logo, and the one an ended conversation already offers -- both land on the
+ * same screen, already holding what was picked last time.
  */
 test("the sidebar offers no find button on either tab", async ({ browser }) => {
   const alice = await arrive(browser);
@@ -297,9 +297,9 @@ test("the sidebar offers no find button on either tab", async ({ browser }) => {
   await matchThem(alice, bob);
 
   const sidebar = bob.locator("#sidebar");
-  await expect(sidebar.getByRole("button", { name: "Find someone" })).toHaveCount(0);
+  await expect(sidebar.getByRole("button", { name: "Start chatting" })).toHaveCount(0);
   await sidebar.getByRole("button", { name: "Friends" }).click();
-  await expect(sidebar.getByRole("button", { name: "Find someone" })).toHaveCount(0);
+  await expect(sidebar.getByRole("button", { name: "Start chatting" })).toHaveCount(0);
 
   // Still one press away from the start screen, which is the thing that button was for.
   await bob.locator("#home").click();

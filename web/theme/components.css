@@ -119,7 +119,7 @@
 }
 
 /*
-  The chat's name bar, which slides shut on a phone while the conversation is scrolled down.
+  The chat's name bar, which slides shut on a phone once the conversation needs the room.
 
   A grid whose single row goes 1fr -> 0fr, rather than a max-height guess: the row collapses to
   exactly the height of what is in it, whatever that turns out to be, and animates because
@@ -127,7 +127,7 @@
   the content keeps its own height and nothing appears to close.
 
   The breakpoint lives here and not in the component: sm and up has room for a header and never
-  collapses it, and that is a fact about the layout rather than about scrolling.
+  collapses it, and that is a fact about the layout rather than about the conversation.
 */
 .chat-head {
   display: grid;
@@ -151,31 +151,18 @@
   Being asked, announced by the bar that answers it.
 
   On a phone this is the only place an incoming request can show up: the app header holding
-  the badge is hidden while a conversation is open, and this bar is shut by the time anybody
-  has scrolled. So it opens itself and then says so for a moment -- a bar that silently
-  reappears behind whatever is being read is not an announcement.
-*/
-.chat-head[data-announcing="true"] .chat-head-row {
-  animation: head-announce 1.3s ease-out 2;
-}
+  the badge is hidden while a conversation is open, and this bar is out of the way by the time
+  anybody has said anything. So it opens itself for a few seconds, and that is the whole of the
+  announcement -- it used to pulse the brand colour behind the whole header while it was up,
+  which announced the same thing a second time and in the visual language of something going
+  wrong. A bar that was not there a moment ago, with "Accept request" in it, is loud enough.
 
-@keyframes head-announce {
-  0%,
-  100% {
-    background-color: transparent;
-  }
-  40% {
-    background-color: color-mix(in srgb, var(--color-brand) 18%, transparent);
-  }
-}
+  `data-announcing` stays on the element with nothing here reading it: it is the state the
+  header is in, and what the browser test asserts about why the bar came back.
+*/
 
 @media (prefers-reduced-motion: reduce) {
   .chat-head { transition: none; }
-  /* Still marked, just not flashing: the colour stays for as long as the attribute is on. */
-  .chat-head[data-announcing="true"] .chat-head-row {
-    animation: none;
-    background-color: color-mix(in srgb, var(--color-brand) 14%, transparent);
-  }
 }
 
 /*

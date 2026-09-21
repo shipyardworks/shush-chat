@@ -370,60 +370,84 @@ test("nothing on a phone is wider than the phone", async ({ browser }) => {
   expect(send.x, "send is not off the left either").toBeGreaterThanOrEqual(0);
 });
 
-/** More room for the conversation: the name bar gets out of the way while you read. */
-test("the chat header scrolls away on a phone and comes back on the way up", async ({
-  browser,
-}) => {
+/**
+ * The name bar leaves when the conversation needs the room, and only then.
+ *
+ * <p>It used to watch the direction of a scroll, which meant two wrong things at once: a
+ * conversation that had visibly run out of space kept its header until somebody dragged it
+ * away, and dragging back up put the header over the messages again. Nobody scrolls in this
+ * test until the header has already gone.
+ */
+test("the chat header goes up when the conversation outgrows its space", async ({ browser }) => {
   const alice = await arriveOnPhone(browser);
   const bob = await arriveOnPhone(browser);
   await matchThem(alice, bob);
 
-  for (let i = 0; i < 14; i++) await say(alice, `line ${i}`);
-
   const head = alice.locator(".chat-head");
+  const messages = alice.locator("#messages");
   // getBoundingClientRect, not boundingBox(): Playwright calls a zero-height element invisible
   // and hands back null, which is the one measurement this test most needs to be able to take.
   const height = () => head.evaluate((node) => node.getBoundingClientRect().height);
+  const scrollTop = () => messages.evaluate((node) => node.scrollTop);
 
-  expect(await height(), "the header is there to begin with").toBeGreaterThan(0);
+  // A conversation with two lines in it has room to spare, so the header stays.
+  await say(alice, "one");
+  await expect(alice.locator("[data-testid=message]")).toHaveCount(1);
+  await expect(head).toHaveAttribute("data-collapsed", "false");
+  expect(await height(), "a short conversation keeps its header").toBeGreaterThan(0);
+  expect(await scrollTop(), "and has nothing to scroll").toBeLessThan(2);
 
-  // A message arriving also scrolls this list, and in the same direction. It must not count:
-  // the header vanishing because the other person spoke is not the reader scrolling.
-  await say(bob, "and one from the other side");
-  await expect(alice.locator("[data-testid=message]").last()).toContainText("other side");
-  expect(await height(), "a new message is not someone scrolling").toBeGreaterThan(0);
+  // Now fill it past the bottom of the screen. Nothing here touches the scroller.
+  for (let i = 0; i < 14; i++) await say(alice, `line ${i}`);
+  await expect(alice.locator("[data-testid=message]")).toHaveCount(15);
 
-  // One move at a time, each waited out before the next. Two jumps issued back to back are
-  // coalesced into a single scroll event at the final position, and a test that depends on
-  // which way the browser felt like reporting that is a test that fails one run in five.
-  const messages = alice.locator("#messages");
-  const scrollTo = async (where: "top" | "bottom") => {
-    await messages.evaluate((node, to) => {
-      node.scrollTop = to === "top" ? 0 : node.scrollHeight;
-    }, where);
-    await expect
-      .poll(() =>
-        messages.evaluate((node, to) =>
-          to === "top" ? node.scrollTop < 1 : node.scrollHeight - node.scrollTop - node.clientHeight < 2,
-        where),
-      )
-      .toBe(true);
-    // Two frames, so the scroll event that jump produced has been dispatched and handled.
-    await alice.evaluate(
-      () => new Promise<void>((done) => requestAnimationFrame(() => requestAnimationFrame(() => done()))),
-    );
-  };
-
-  await scrollTo("top");
-  await scrollTo("bottom");
-  await expect(head).toHaveAttribute("data-collapsed", "true");
+  await expect(head, "the messages needed the room, so the header gave it up").toHaveAttribute(
+    "data-collapsed",
+    "true",
+  );
   await expect.poll(height).toBeLessThan(2);
 
-  // ...and back the moment the reader goes the other way. A header that will not return is
-  // worse than one that never left.
-  await scrollTo("top");
+  // It settles there rather than flapping: collapsing hands the list the header's own height,
+  // and a rule that then re-measured would find it fits, reopen, and start again.
+  const readings: number[] = [];
+  for (let i = 0; i < 5; i++) {
+    await alice.waitForTimeout(120);
+    readings.push(await height());
+  }
+  expect(readings, "the header stays where it settled").toEqual(readings.map(() => readings[0]));
+
+  // Back at the very start of the conversation there is nothing above to make room for, so
+  // the header -- and the burger and Add friend in it -- are reachable again.
+  await messages.evaluate((node) => {
+    node.scrollTop = 0;
+  });
   await expect(head).toHaveAttribute("data-collapsed", "false");
   await expect.poll(height).toBeGreaterThan(0);
+
+  // And away again on the way back down.
+  await messages.evaluate((node) => {
+    node.scrollTop = node.scrollHeight;
+  });
+  await expect(head).toHaveAttribute("data-collapsed", "true");
+  await expect.poll(height).toBeLessThan(2);
+});
+
+/**
+ * A message arriving is not a reason to keep a header, and it is not a reason to lose one
+ * either. What decides is whether the conversation still fits.
+ */
+test("a conversation that fits keeps its header however much arrives", async ({ browser }) => {
+  const alice = await arriveOnPhone(browser);
+  const bob = await arriveOnPhone(browser);
+  await matchThem(alice, bob);
+
+  const head = alice.locator(".chat-head");
+  const height = () => head.evaluate((node) => node.getBoundingClientRect().height);
+
+  await say(bob, "from the other side");
+  await expect(alice.locator("[data-testid=message]").last()).toContainText("other side");
+  expect(await height(), "one message is not a space problem").toBeGreaterThan(0);
+  await expect(head).toHaveAttribute("data-collapsed", "false");
 });
 
 /**
@@ -762,6 +786,9 @@ test("the way out sits beside the message box, not in the header", async ({ brow
   const composer = (await alice.locator("#composer").boundingBox())!;
   const head = (await alice.locator(".chat-head-row").boundingBox())!;
 
+  // It says what it does, in the word the rest of the category uses.
+  await expect(alice.locator("#leave")).toHaveAttribute("aria-label", "Skip to someone else");
+
   // Left of the message box, on the same row as it, and nowhere near the header.
   expect(leave.x + leave.width).toBeLessThanOrEqual(composer.x + 1);
   expect(leave.y).toBeGreaterThan(head.y + head.height);
@@ -796,6 +823,75 @@ test("a friend's conversation can start a new one from the message box", async (
   // every later test in this run would then be matching against a ghost.
   await bob.locator("#closePicker").click();
   await expect(bob.locator("#findSomeoneModal")).toHaveCount(0);
+});
+
+/**
+ * The requests dropdown opens next to the button that opens it.
+ *
+ * <p>It used to hang from its right edge, which is correct alignment and the wrong end of the
+ * panel: 320px of dropdown anchored to a button in the top-right corner of a 390px phone put
+ * its other side almost against the opposite edge of the screen, so the thing you had just
+ * tapped was as far from the panel as the screen allows. It is placed from its near corner
+ * now, and clamped, so the only thing that moves it is running out of room.
+ */
+for (const where of ["phone", "desktop"] as const) {
+  test(`the requests panel opens beside its button on a ${where}, and stays on screen`, async ({
+    browser,
+  }) => {
+    const alice = where === "phone" ? await arriveOnPhone(browser) : await arrive(browser);
+    const bob = where === "phone" ? await arriveOnPhone(browser) : await arrive(browser);
+    await matchThem(alice, bob);
+    await alice.locator("#addFriend").click();
+
+    // Back at the start screen, which is where the app header and its badge live -- on a
+    // phone that header is deliberately hidden while a conversation is open.
+    await bob.reload();
+    await expect(bob.locator("[data-testid=requestCount]")).toHaveText("1");
+    await bob.locator("#requestsButton").click();
+
+    const panel = (await bob.locator("#requestsPanel").boundingBox())!;
+    const button = (await bob.locator("#requestsButton").boundingBox())!;
+    const view = bob.viewportSize()!;
+
+    expect(panel.y, "under the button").toBeGreaterThanOrEqual(button.y + button.height);
+    expect(panel.x, "not off the left").toBeGreaterThanOrEqual(0);
+    expect(panel.x + panel.width, "not off the right").toBeLessThanOrEqual(view.width + 1);
+    expect(panel.y + panel.height, "not off the bottom").toBeLessThanOrEqual(view.height + 1);
+
+    // Its left edge starts at the button's, and only a screen edge moves it.
+    const wanted = Math.min(button.x, view.width - panel.width - 8);
+    expect(Math.abs(panel.x - wanted), "placed from the corner nearest the button").toBeLessThan(2);
+  });
+}
+
+/**
+ * The block confirmation fits on one line of its own button.
+ *
+ * <p>"Tap again to block -- this can't be undone yet" is a sentence in a pill: on a phone it
+ * wrapped to two lines and the button grew a line taller than everything beside it. What the
+ * second tap does is the whole of what has to be said.
+ */
+test("the block confirmation fits inside the button", async ({ browser }) => {
+  const alice = await arriveOnPhone(browser);
+  const bob = await arriveOnPhone(browser);
+  await matchThem(alice, bob);
+
+  await bob.locator("#chatAvatar").click();
+  const block = bob.locator("#blockUser");
+  await expect(block).toHaveText("Block");
+  const close = (await bob.locator("#closeProfile").boundingBox())!;
+
+  await block.click();
+  await expect(block).toHaveText("Tap again to block");
+  const confirming = (await block.boundingBox())!;
+
+  // The same height as an ordinary one-line button in the same dialog is the same thing as
+  // "one line", and it survives a change of font size where a hard-coded height would not.
+  expect(confirming.height, "still one line").toBeLessThanOrEqual(close.height + 1);
+  expect(confirming.width, "inside the dialog").toBeLessThanOrEqual(close.width + 1);
+
+  // Left alone, rather than blocking somebody in a test that is about a button's size.
+  await bob.locator("#closeProfile").click();
 });
 
 /**

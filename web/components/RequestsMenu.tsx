@@ -4,6 +4,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { api } from "@/lib/api";
 import { messages } from "@/lib/messages";
+import { positionPopover } from "@/lib/menuPosition";
 import type { FriendRequest } from "@/lib/types";
 import { PersonRequests } from "./icons";
 
@@ -20,6 +21,9 @@ import { PersonRequests } from "./icons";
  * so a backdrop left inside the header shrinks to cover only the header's own thin strip, and
  * clicking anywhere in the actual page does nothing. Escaping the header's subtree is the fix,
  * not remembering never to use `backdrop-filter` near an overlay.
+ *
+ * <p>Portaled also means placing it by hand, which goes through the same `positionPopover` the
+ * message menus use -- one set of rules for "beside the thing that opened you, and on screen".
  */
 export const RequestsMenu = ({
   requests,
@@ -29,15 +33,33 @@ export const RequestsMenu = ({
   onRefresh: () => Promise<void>;
 }) => {
   const [open, setOpen] = useState(false);
-  const [at, setAt] = useState<{ top: number; right: number } | null>(null);
+  const [at, setAt] = useState<{ top: number; left: number } | null>(null);
   const button = useRef<HTMLButtonElement>(null);
+  const panel = useRef<HTMLDivElement>(null);
 
+  /**
+   * Measured, not assumed: the panel is laid out first and placed second, in a layout effect
+   * so nothing is painted at the wrong spot in between. Its height is what decides whether it
+   * has to be pulled up to stay on screen, and its height depends on how many requests there
+   * are -- which is why that is a dependency here.
+   */
   useLayoutEffect(() => {
-    if (!open) return;
-    const box = button.current?.getBoundingClientRect();
-    if (!box) return;
-    setAt({ top: box.bottom + 8, right: window.innerWidth - box.right });
-  }, [open]);
+    if (!open) {
+      setAt(null);
+      return;
+    }
+    const trigger = button.current?.getBoundingClientRect();
+    const box = panel.current?.getBoundingClientRect();
+    if (!trigger || !box) return;
+    setAt(
+      positionPopover(
+        trigger,
+        { width: box.width, height: box.height },
+        { width: window.innerWidth, height: window.innerHeight },
+        { mode: "below" },
+      ),
+    );
+  }, [open, requests.length]);
 
   // Every other dismissible overlay in the app closes on Escape; this one is not a special
   // case that should behave differently just because it happens to live in the header.
@@ -85,14 +107,16 @@ export const RequestsMenu = ({
       </button>
 
       {open &&
-        at &&
         createPortal(
           <>
             <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
             <div
+              ref={panel}
               id="requestsPanel"
-              className="scroll-elegant panel fixed z-50 max-h-[360px] w-80 overflow-y-auto p-3"
-              style={{ top: at.top, right: at.right }}
+              className="scroll-elegant panel fixed z-50 max-h-[360px] w-80 max-w-[calc(100vw-16px)] overflow-y-auto p-3"
+              // Hidden for the one frame it exists unplaced, rather than drawn at 0,0 and then
+              // moved. It keeps its box either way, which is what there is to measure.
+              style={{ top: at?.top ?? 0, left: at?.left ?? 0, visibility: at ? "visible" : "hidden" }}
             >
               <h2 className="section-label px-1">Requests</h2>
               <ul id="requests" className="m-0 flex list-none flex-col gap-1.5 p-0">

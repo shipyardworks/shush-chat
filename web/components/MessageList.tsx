@@ -6,6 +6,24 @@ import { MessageBubble } from "./MessageBubble";
 import { MessageSkeleton } from "./Skeleton";
 
 /**
+ * How much room the conversation needs, and how much it has.
+ *
+ * <p>Reported rather than acted on: this list does not own what sits above it. The header
+ * decides for itself whether it still fits, from these three numbers.
+ */
+export type Room = {
+  /** The height of everything in the conversation, padding included. */
+  content: number;
+  /** The height this list currently has to show it in. */
+  view: number;
+  /** Scrolled right back to the start, where there is nothing above to make room for. */
+  atTop: boolean;
+};
+
+/** A few pixels, so a rounding difference is not a reason to move a header. */
+const AT_TOP = 8;
+
+/**
  * Date separators and system events share one pill on purpose: both are the room talking
  * rather than a person, and a reader should not have to tell them apart.
  */
@@ -36,7 +54,7 @@ export const MessageList = ({
   onHideForMe,
   onOpenImage,
   onBackgroundTap,
-  onScrollDirection,
+  onRoom,
 }: {
   items: ChatItem[];
   /** History is still on its way -- placeholders, not an empty pane. */
@@ -50,15 +68,12 @@ export const MessageList = ({
   onOpenImage: (mediaKey: string) => void;
   /** Tapping anywhere here, message bubbles included, drops the keyboard -- same as WhatsApp. */
   onBackgroundTap?: () => void;
-  /**
-   * True once the reader has scrolled down far enough that the header above this list is
-   * costing more than it is telling them, false again the moment they scroll back up.
-   * Reported rather than acted on here: this list does not own what sits above it.
-   */
-  onScrollDirection?: (collapsed: boolean) => void;
+  /** Called whenever any of {@link Room} changes. Must be stable. */
+  onRoom?: (room: Room) => void;
 }) => {
   const bottom = useRef<HTMLDivElement>(null);
   const list = useRef<HTMLDivElement>(null);
+  const content = useRef<HTMLDivElement>(null);
   const [flashing, setFlashing] = useState<number | null>(null);
   /**
    * Whether the reader is at the live end of the conversation.
@@ -69,70 +84,47 @@ export const MessageList = ({
    * after somebody had deliberately scrolled away.
    */
   const pinned = useRef(true);
-  /** Where the last scroll event left us, so this one knows which way it went. */
-  const lastTop = useRef(0);
+
   /**
-   * Set while this component is scrolling itself to follow the live end.
+   * Measure, and say so.
    *
-   * <p>Following the bottom fires the same scroll events a finger does, and in the same
-   * direction. Without telling the two apart, a message arriving scrolled the list down and
-   * the header above it took that for someone reading and slid shut -- so the header vanished
-   * because the other person said something, which is nobody's idea of scrolling.
+   * <p>Two observed elements, because the two numbers move independently: the scroller's own
+   * height changes when the keyboard comes up or the header gets out of the way, and the
+   * content's changes with every message, every image that finishes loading and every bubble
+   * that rewraps.
    */
-  const following = useRef(false);
+  const report = useCallback(() => {
+    const view = list.current;
+    const inner = content.current;
+    if (!view || !inner || !onRoom) return;
+    onRoom({
+      content: inner.offsetHeight,
+      view: view.clientHeight,
+      atTop: view.scrollTop <= AT_TOP,
+    });
+  }, [onRoom]);
+
+  useEffect(() => {
+    const view = list.current;
+    const inner = content.current;
+    if (!view || !inner || !onRoom) return;
+    const observer = new ResizeObserver(report);
+    observer.observe(view);
+    observer.observe(inner);
+    report();
+    return () => observer.disconnect();
+  }, [onRoom, report]);
 
   const onScroll = () => {
     const node = list.current;
     if (!node) return;
     pinned.current = node.scrollHeight - node.scrollTop - node.clientHeight < 120;
-
-    const top = node.scrollTop;
-    if (following.current) {
-      lastTop.current = top;
-      return;
-    }
-
-    /*
-     * Discount the header's own doing before measuring the reader's.
-     *
-     * Collapsing the header gives this list that height. A list parked at the bottom then has
-     * its scrollTop clamped down by the same amount -- a scroll event going the other way,
-     * arriving while the bar is still closing. Taken at face value it reopens the bar, which
-     * shortens the list, which closes it again: a flicker that settles nowhere.
-     *
-     * The clamp is the whole of the difference and can be computed rather than waited out, so
-     * the reference moves with it. That beats ignoring these events, which would also throw
-     * away a real scroll made in the same moment -- and scrolling back up the instant the bar
-     * starts closing is exactly when somebody would.
-     */
-    const maxTop = Math.max(0, node.scrollHeight - node.clientHeight);
-    if (lastTop.current > maxTop) lastTop.current = maxTop;
-
-    const moved = top - lastTop.current;
-    // A threshold, because iOS rubber-banding and the browser's own scroll-anchoring both
-    // emit a stream of one-pixel jitter that would otherwise flap the header open and shut.
-    if (Math.abs(moved) <= 8) return;
-    lastTop.current = top;
-
-    // Near the top there is nothing gained by hiding it, and a header that will not come
-    // back until you scroll further down is a header that looks broken.
-    //
-    // Reported every time rather than only on a change: React drops a set to the value that
-    // is already there, and keeping a second copy of the answer down here is how it would
-    // come to disagree with the one above -- which resets itself when the conversation
-    // changes, and would then ignore the first scroll in the new one.
-    onScrollDirection?.(moved > 0 && top > 64);
+    report();
   };
 
   useEffect(() => {
     if (!pinned.current) return;
-    following.current = true;
     bottom.current?.scrollIntoView({ block: "end" });
-    // Cleared after the scroll events that jump caused have been delivered.
-    const done = requestAnimationFrame(() => {
-      following.current = false;
-    });
-    return () => cancelAnimationFrame(done);
   }, [items]);
 
   /**
@@ -150,13 +142,17 @@ export const MessageList = ({
   }, []);
 
   return (
+    // The scroller and the conversation are two elements, not one. A scroller's own height is
+    // all a ResizeObserver on it will ever report; what the header needs to know is how tall
+    // the conversation inside it has become, which is the inner element's box.
     <div
       id="messages"
       ref={list}
       onScroll={onScroll}
       onClick={onBackgroundTap}
-      className="scroll-elegant flex min-h-0 flex-1 flex-col gap-[3px] overflow-y-auto p-6"
+      className="scroll-elegant flex min-h-0 flex-1 flex-col overflow-y-auto"
     >
+      <div ref={content} className="flex flex-col gap-[3px] p-6">
       {loading && <MessageSkeleton />}
       {!loading && items.map((item, index) => {
         if (item.kind === "day") {
@@ -194,6 +190,7 @@ export const MessageList = ({
         );
       })}
       <div ref={bottom} />
+      </div>
     </div>
   );
 };

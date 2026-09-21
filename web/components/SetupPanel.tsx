@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { findByTag, normaliseTag } from "@/lib/interests";
+import { messages } from "@/lib/messages";
 import type { Interest } from "@/lib/types";
 
 const PATIENCE = [
@@ -368,7 +369,7 @@ export const SetupPanel = ({
               {findStatus ? "Still looking" : "Looking"}
             </>
           ) : (
-            "Find someone"
+            messages.action.find
           )}
         </button>
         {findStatus && (

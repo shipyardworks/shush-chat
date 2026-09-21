@@ -63,6 +63,27 @@ export const messages = {
     why: "Keep your chats and friends, and sign in from any device.",
   },
 
+  /**
+   * The buttons that start something, or end it.
+   *
+   * <p>One name for one action, wherever it is offered. Starting a conversation was called
+   * "Find someone" on three screens and "Start chatting" on the front door, which is two names
+   * for the one thing this app does -- and "someone" is the word that makes it sound like a
+   * search through people rather than an introduction to one.
+   */
+  action: {
+    find: "Start chatting",
+    /** The same button in a friend's thread, where "new" is the part that is doing the work. */
+    findNew: "Start chatting with someone new",
+    /**
+     * Out of this conversation and on to the next. It said "Leave", which named what happens
+     * to the conversation rather than what anyone wants; "Switch" was closer and still made
+     * somebody ask what was being switched. This is the word the whole category uses.
+     */
+    skip: "Skip",
+    skipTitle: "Skip to someone else",
+  },
+
   /** The conversation header's second line. */
   peer: {
     randomMatch: "Random match",

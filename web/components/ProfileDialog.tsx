@@ -97,7 +97,11 @@ export const ProfileDialog = ({
                 onClose();
               }}
             >
-              {confirmingBlock ? "Tap again to block — this can't be undone yet" : "Block"}
+              {/* Short enough to stay on one line inside the button: the long version ("Tap
+                  again to block -- this can't be undone yet") wrapped to two lines on a phone
+                  and pushed through the bottom of its own pill. What the second tap does is
+                  the whole of what has to be said, and the button said "Block" a moment ago. */}
+              {confirmingBlock ? "Tap again to block" : "Block"}
             </button>
           )}
           <button id="closeProfile" type="button" className="btn-ghost" onClick={onClose}>
