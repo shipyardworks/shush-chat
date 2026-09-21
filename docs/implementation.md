@@ -49,7 +49,7 @@ under time pressure.
 | ----- | ----- | ----- |
 | Integration (`api`) | 190 | Real Postgres, Redis, Redpanda, Elasticsearch, MinIO via Testcontainers. Nothing mocked |
 | Unit (`api`) | 9 | Pure logic only |
-| Browser (`web`, Playwright) | 82 | Journey, session, setup, layout, interactions and connection specs, against a stack that is already running |
+| Browser (`web`, Playwright) | 89 | Journey, session, setup, layout, interactions and connection specs, against a stack that is already running |
 | Harness self-tests (`bench`) | 17 | Each invariant fed a violating stream, asserted to report it |
 | Isolation (`platform`) | 5 checks | Cross-tenant access attempted with real credentials |
 
@@ -541,12 +541,13 @@ one mark changing, a plus, a tick, a list.
 ### The way out of a conversation is beside the message box
 
 Leaving was in the header's far corner, then in its near one, and the header is the problem
-either way: on a phone it is scrolled shut by the time anybody wants out, so ending a
-conversation meant scrolling back up to a corner. It sits next to the composer now, where the
-thumb already is, and it says **Switch** -- "Leave" named what happens to the conversation
-rather than what anyone wants, and "Skip" is the obvious competitor's word. A friend's
-conversation has nothing to leave and gets the way to a new stranger in the same slot, which
-on a phone it had no way to reach at all.
+either way: on a phone it is gone by the time anybody wants out, so ending a conversation meant
+scrolling back up to a corner. It sits next to the composer now, where the thumb already is,
+and it says **Skip**. "Leave" named what happens to the conversation rather than what anyone
+wants; "Switch" was tried next and left people asking what was being switched; Skip is what the
+whole category calls this and what it plainly is, on the owner's instruction. A friend's
+conversation has nothing to skip and gets the way to a new stranger in the same slot, which on
+a phone it had no way to reach at all.
 
 And when the other person has asked to keep you, the button that would ask them becomes the
 one that answers -- accepting there clears the header's menu and its count, because the
@@ -556,9 +557,83 @@ button, the list and the badge are three readings of one list.
 
 A request arriving raised a toast, which was wrong twice over: it covered the conversation,
 and it went away again while the button it was about stayed hidden. On a phone the app header
-holding the requests badge is hidden while a conversation is open, and the chat header is
-scrolled shut -- so the announcement *is* that header opening itself and marking itself for a
-few seconds, with "Accept request" already in it. The pill in the thread names who asked.
+holding the requests badge is hidden while a conversation is open, and the chat header is out
+of the way -- so the announcement *is* that header opening itself for three seconds, with
+"Accept request" already in it. The pill in the thread names who asked.
+
+Opening is the whole of it. The bar also pulsed the brand colour behind itself while it was
+up, which says the same thing a second time and in the visual language of a fault; a header
+that was not there a moment ago, carrying a button that was not there either, is already the
+loudest thing on the screen. Removed on the owner's instruction.
+
+### The header leaves when the conversation needs the room, not when it is scrolled
+
+The name bar used to watch the direction of a scroll: down and it slid shut, up and it came
+back. That is what every phone chat app does and it was wrong here in both directions. A
+conversation that had visibly filled the screen kept a header sitting on top of it until
+somebody dragged it away, and dragging back up -- which is what you do to read what was just
+said -- put the header back over the messages. The room the conversation needs is the thing
+that actually changed, so that is what is measured now: a `ResizeObserver` on the scroller and
+on the conversation inside it, and the header gives up its ~58px the moment the second is
+taller than the first.
+
+Three things stop it flapping, and the first is the one that matters. **The comparison is
+always against the room there would be with the header open** -- collapsing hands the list the
+header's own height, so measuring the result would say it fits, which would reopen it, which
+would take that height away again. Subtracting the header back out asks one question in both
+states, so the answer cannot flip between them (this is bug 36 in a new shape; the old fix
+discounted the same clamp inside the scroll handler). A request arriving overrides it, because
+the bar carrying the answer is no use behind the messages. And the very top of the conversation
+overrides it too: there is nothing above to make room for, so the header -- with the burger and
+Add friend in it -- is reachable again by scrolling back to the start. That is a fixed point
+rather than a direction, which is why it cannot oscillate the way the old rule did.
+
+The message list is two elements now rather than one: a scroller, and the conversation inside
+it. A `ResizeObserver` on a scroller reports only the scroller's own height, and the height of
+what is in it is the whole question.
+
+### The requests dropdown opens at the corner nearest its button
+
+It hung from its right edge, aligned to the button's right edge -- correct alignment, and the
+wrong end of the panel. 320px of dropdown anchored to a button in the top-right corner of a
+390px phone puts its far side almost against the opposite edge of the screen, so the thing you
+had just tapped ends up as far from the panel as the screen allows. It is placed from its
+top-left corner now, under the button's left edge, and clamped into the viewport -- which on a
+phone means its right edge rests against the screen edge beside the button. The placement goes
+through the same `positionPopover` the message menus use, so there is one set of rules for
+"beside the thing that opened you, and on screen", and the panel is measured rather than
+assumed: it is laid out first and placed in a layout effect, hidden for the one frame in
+between.
+
+### Blocking and unfriending tell the other person
+
+A friendship is one row for two people. Deleting it -- by removing a friend, or by blocking
+somebody you had kept, which has always deleted it inside the same transaction -- left the
+other client showing a friend row that was no longer true, in the blocking case for somebody
+who could no longer reach them at all. It corrected itself on the next full load and not
+before.
+
+Both now publish `friendshipEnded` to the other party after commit -- the block only when
+there was a friendship to delete -- and the client reloads its lists. It says only that the
+friendship ended: which of the two happened is not told, for the same reason a declined
+request is silent. The conversation is left open either way -- blocking
+is about who can reach you, and ejecting somebody from a thread they are standing in is a
+separate decision (it is still in Known Limitations).
+
+### Whether this is a friend is read from the friends list, never from the conversation
+
+`conversations.kind` is set the moment a friendship is made and never unset, and the chat panel
+read it to decide whether to offer Add friend. So a conversation with somebody you had since
+removed hid the one button that could undo that, offered no way out of itself -- a friend's
+thread has no Skip -- and said "Offline" under their name as though nothing had happened. The
+sidebar already had this right and said so in a comment (`nonFriendConversations` filters on
+the friends list for exactly this reason); the panel had a second copy of the answer that could
+disagree with it, and did.
+
+The flag is gone rather than corrected. `isFriendConversation` is now derived, in one place,
+from whether this person is in the friends list right now -- which is also what makes the
+`friendshipEnded` frame above enough on its own: the other side's buttons come back when their
+list reloads, with nothing else to keep in step.
 
 ### `docs/SCHEMA.md` is generated
 
@@ -620,6 +695,14 @@ Each was invisible to code review and would have shipped.
 | 44 | A typed interest was put on screen before the server confirmed it, and only remembered *after*. Worse, navigating away aborts the create in flight and the failure path read that as a refusal and deleted the tag -- so a reload at the wrong moment silently removed a word that was on screen and chosen. It failed only under load, which is exactly when the window is wide | the browser suite, intermittently; then reproduced on demand by holding the create for four seconds and reloading through it |
 | 45 | Accepting a request from inside the conversation left the header's badge showing "1". Friends and chats were reloaded; the requests list the badge counts was not | the test written for the new button |
 | 46 | Every text field was 15px, so iOS zoomed the page in on focus and never zoomed back -- which is why the header buttons ended up half off the right edge the moment somebody started typing, with nothing about the layout actually wrong | a phone screenshot |
+| 47 | A conversation with somebody you had **removed as a friend** still behaved as a friend's: no Add friend, no way out of it, and "Offline" under their name. The panel decided it from `conversations.kind`, which is set when a friendship is made and never unset -- the sidebar read the friends list for the same question and was right | the owner, on the live site |
+| 48 | **Blocking or unfriending told only the person who did it.** One row, two people: the server deleted the friendship and published nothing, so the other side went on showing a friend who -- after a block -- could no longer reach them, until something else made that client reload | the owner, reporting that a blocked friend stayed in the list; then a two-browser test that never reloads |
+| 49 | `leaving` is a ref, set on unmount to stop a socket being reopened behind a page that has gone, and **never cleared on the way back in**. Mount, unmount, mount again and every `openSocket` returned immediately: an app that renders perfectly, hears nothing, and says only "Reconnecting". React's strict mode does exactly that double-mount, so it was reproducible on the first load of every dev server | trying to drive the app with `next dev` while testing something else |
+
+**49 is 42 again, and 42 is the same shape as 11, 20, 21, 33 and 34.** A silent refusal, found
+the same way all of them were -- by asking the running system a question rather than by reading
+the code. It never reached production, because React only double-mounts in development and the
+container runs a production build; it was one remount away from being bug 42 for real.
 
 **42 is the same shape as 11, 20, 21, 33 and 34, and the worst of them.** Every one of those was
 a silent refusal -- a request the system dropped with nothing anywhere saying so. This one was a

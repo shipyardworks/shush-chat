@@ -421,7 +421,10 @@ the remaining TTL.
 **Matching ranking is BM25 over tag terms, not a tuned relevance model.** It does not weight rare
 interests above common ones, so matching on "music" counts the same as matching on "volunteering".
 
-**A blocked user is excluded from matching but not ejected from an existing conversation.**
+**A blocked user is excluded from matching but not ejected from an existing conversation.** The
+conversation stops being listed for either of them, and if the two were friends the other client
+is told so it can drop the row at once; block a stranger and their chat list corrects itself on
+its next load rather than immediately.
 
 **Reports are recorded, not acted on.** No moderation queue, nothing reads the table. Honest for a
 project running with test users — and exactly the work that would have to exist *before* opening
@@ -673,13 +676,13 @@ and renders a "Reconnecting…" pill the whole time it is not up. That last part
 one: the cost of this was almost all in nothing saying anything was wrong
 (`docs/implementation.md`, bug 42).
 
-**"Find someone" is not in the sidebar.** It sat above both tabs whether either had anything in
-it, on the list of people you have already talked to -- which is a list of what happened, not a
-place to start something new. The logo goes to the start screen and an ended conversation
-already offers its own. One consequence is worth stating rather than hiding: on a phone, with a
-conversation open and the drawer over it, the app header is deliberately hidden, so from inside
-that drawer there is now no route to the start screen. Leaving the conversation, or its ending,
-still offers one.
+**Starting a conversation is not offered in the sidebar.** It sat above both tabs whether either
+had anything in it, on the list of people you have already talked to -- which is a list of what
+happened, not a place to start something new. The logo goes to the start screen, and an ended
+conversation already offers its own. One consequence is worth stating rather than hiding: on a
+phone, with a conversation open and the drawer over it, the app header is deliberately hidden,
+so from inside that drawer there is now no route to the start screen. Leaving the conversation,
+or its ending, still offers one.
 
 **A request already sent is a tick, not a greyed-out plus.** The button has always been disabled
 after the first ask. On a phone the words are not on screen to say so, and a dimmed plus reads
@@ -733,20 +736,49 @@ differently shaped version of a panel that already exists, so finding someone lo
 thing from the start screen and another from a finished chat. Same panel, same width, wherever
 it is opened from.
 
-**The way out of a conversation is beside the message box, and is called Switch.** It was in
-the header's far corner, then in its near one, and on a phone the header is scrolled shut by
-the time anybody wants out -- leaving meant scrolling back up to a corner. "Leave" named what
-happens to the conversation rather than what anyone wants; "Skip" is the obvious competitor's
-word. A friend's conversation has nothing to leave, so the same slot is the way to a new
+**The way out of a conversation is beside the message box, and is called Skip.** It was in
+the header's far corner, then in its near one, and on a phone the header is gone by the time
+anybody wants out -- leaving meant scrolling back up to a corner. "Leave" named what happens to
+the conversation rather than what anyone wants, and "Switch" left people asking what was being
+switched. A friend's conversation has nothing to skip, so the same slot is the way to a new
 stranger -- which, on a phone, a friend's thread had no other route to.
+
+**One name for the one thing this app does: "Start chatting".** The front door said that and
+three screens inside said "Find someone", which is two names for one action -- and "someone"
+makes it sound like a search through people rather than an introduction to one.
+
+**The chat header leaves when the conversation needs the room.** It used to watch the direction
+of a scroll, which got it wrong twice: a conversation that had filled the screen kept a header
+on top of it until somebody dragged it away, and dragging back up to read put it there again.
+What is measured now is space -- the conversation's height against the scroller's -- and always
+against the room there would be *with the header open*, because collapsing hands the list that
+height and a rule that re-measured it would flap. Scrolling back to the very start brings it
+down: nothing is above it there, and that is where the burger and Add friend live.
 
 **A request can be accepted from the conversation it was made in.** The button that would ask
 to keep someone becomes the one that answers them, and accepting there empties the header's
 requests menu and its count -- the button, the list and the badge are three readings of one
-list. On a phone, the arrival is announced by the chat header opening itself and marking
-itself for a few seconds, with that button already in it. A toast was tried and removed: it
-covered the conversation and then went away again, while the button it was about stayed
-hidden.
+list. On a phone, the arrival is announced by the chat header opening itself for three seconds
+with that button already in it, and that is the whole announcement: it also pulsed the brand
+colour behind itself, which says the same thing twice in the colours of a fault. A toast was
+tried and removed before that: it covered the conversation and then went away again, while the
+button it was about stayed hidden.
+
+**A dropdown opens at the corner nearest the button that opened it.** The requests panel hung
+from its right edge, which is correct alignment and the wrong end of a 320px panel: anchored to
+a button in the corner of a 390px phone, its other side ended up almost at the opposite edge of
+the screen. It is placed from its top-left corner under the button and clamped into the
+viewport, through the same rule the message menus use.
+
+**Removing a friend, or blocking one, tells the other person -- and nothing more.** A friendship
+is one row for two people, so deleting it changes both lists; only the one who did it used to
+know. Both now push `friendshipEnded`, and the other client reloads. Which of the two happened
+is not said, for the same reason a declined request is silent.
+
+**Whether a conversation is with a friend is read from the friends list, every time.**
+`conversations.kind` is set when a friendship is made and never unset, so a conversation with
+somebody since removed still hid Add friend and offered no way out of itself. The question is
+about the two people now, not about how the thread began.
 
 **Everything the app says lives in `web/lib/messages.ts`, is short, and never says "they".**
 Seven or eight words; a pill in the middle of a conversation is a caption, not a paragraph.
