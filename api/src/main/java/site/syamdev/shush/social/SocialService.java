@@ -148,6 +148,11 @@ public class SocialService {
         if (friendships.deleteBetween(actingUserId, otherUserId) == 0) {
             throw ApiException.badRequest("not_friends", "you are not friends with that person");
         }
+        // The other person is looking at a friends list that has just stopped being true. Only
+        // the one who acted knew, so theirs stayed right and theirs alone -- until something
+        // else happened to make that client reload.
+        AfterCommit.run(() -> backplane.publish(otherUserId,
+                new ServerFrame.FriendshipEnded(actingUserId)));
     }
 
     @Transactional(readOnly = true)
@@ -163,9 +168,15 @@ public class SocialService {
         blocks.save(new Block(blockerId, blockedId, clock.instant()));
         // Blocking someone you kept undoes the keeping; leaving the friendship in place would
         // make the friends list show someone you have asked never to hear from again.
-        friendships.findById(new Friendship.Key(
-                Friendship.lower(blockerId, blockedId),
-                Friendship.higher(blockerId, blockedId))).ifPresent(friendships::delete);
+        //
+        // And that cuts both ways, which is the half that was missing: the friendship row is
+        // one row for two people, so deleting it silently left the blocked side showing a
+        // friend who could no longer reach them, with the list only correcting itself on the
+        // next full load. They are told the friendship ended and nothing more.
+        if (friendships.deleteBetween(blockerId, blockedId) > 0) {
+            AfterCommit.run(() -> backplane.publish(blockedId,
+                    new ServerFrame.FriendshipEnded(blockerId)));
+        }
     }
 
     @Transactional

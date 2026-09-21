@@ -181,6 +181,13 @@ test("a request can be accepted from the chat, and the badge goes with it", asyn
   await expect(bob.locator("#messages")).toContainText(`${aliceName} sent you a friend request.`);
   await expect(bob.locator(".chat-head")).toHaveAttribute("data-collapsed", "false");
   await expect(bob.locator(".chat-head")).toHaveAttribute("data-announcing", "true");
+  // Opening is the announcement, and all of it. The bar used to pulse the brand colour behind
+  // itself while it was up, which says the same thing twice and in the colours of a fault.
+  await expect
+    .poll(() =>
+      bob.locator(".chat-head-row").evaluate((node) => getComputedStyle(node).animationName),
+    )
+    .toBe("none");
   await expect(bob.locator("[data-testid=requestCount]")).toHaveText("1");
 
   // The same control, answering instead of asking.
@@ -247,6 +254,83 @@ test("unread counts, and a removed friend is still someone you can be matched wi
   await alice.locator("#home").click();
   await bob.locator("#home").click();
   await matchThem(alice, bob);
+});
+
+/**
+ * Removing a friend gives the conversation back everything a stranger's has.
+ *
+ * <p>The thread stays -- it still happened -- and Add friend comes back with it, because
+ * whether this is a friend is a fact about the two people now, not about what the conversation
+ * was when it started. It was read from `conversations.kind`, which is set the moment a
+ * friendship is made and never unset: so a chat with somebody you had removed hid Add friend,
+ * offered no way out of itself, and said "Offline" under their name as though nothing had
+ * changed.
+ */
+test("a conversation with someone you removed offers to keep them again", async ({ browser }) => {
+  const alice = await arrive(browser);
+  const bob = await arrive(browser);
+  await matchThem(alice, bob);
+  await alice.locator("#composer").fill("something to keep the thread");
+  await alice.locator("#send").click();
+  await expect(bob.locator("#messages")).toContainText("something to keep");
+
+  await alice.locator("#addFriend").click();
+  await openRequests(bob);
+  await bob.locator("#requestsPanel").getByRole("button", { name: "Accept" }).click();
+  await bob.keyboard.press("Escape");
+  await openTab(bob, "friends");
+  await bob.locator("[data-testid=friend]").first().click();
+  await expect(bob.locator("#addFriend"), "kept: nothing left to ask").toHaveCount(0);
+
+  await bob.locator("#chatAvatar").click();
+  await bob.locator("#removeFriend").click();
+  await openTab(bob, "friends");
+  await expect(bob.locator("[data-testid=friend]")).toHaveCount(0);
+
+  // Opened from Chats this time, which is the list it moved to -- and the row that used to
+  // carry the stale answer.
+  await openTab(bob, "chats");
+  await bob.locator("[data-testid=chat]").first().click();
+  await expect(bob.locator("#messages")).toContainText("something to keep");
+  await expect(bob.locator("#addFriend"), "no longer kept, so asking is on offer").toBeVisible();
+  await expect(bob.locator("#leave"), "and so is the way out of it").toBeVisible();
+  await expect(bob.locator("#findFromChat")).toHaveCount(0);
+});
+
+/**
+ * Blocking somebody you had kept undoes the keeping, for both of them.
+ *
+ * <p>The server has always deleted the friendship inside the same transaction as the block.
+ * What it never did was tell the other person, so the blocked side went on showing a friend
+ * row for somebody who could no longer reach them -- until something else happened to reload
+ * the list.
+ */
+test("blocking someone takes them out of both friends lists", async ({ browser }) => {
+  const alice = await arrive(browser);
+  const bob = await arrive(browser);
+  await matchThem(alice, bob);
+
+  await alice.locator("#addFriend").click();
+  await openRequests(bob);
+  await bob.locator("#requestsPanel").getByRole("button", { name: "Accept" }).click();
+  await bob.keyboard.press("Escape");
+  for (const page of [alice, bob]) {
+    await openTab(page, "friends");
+    await expect(page.locator("[data-testid=friend]")).toHaveCount(1);
+  }
+
+  await bob.locator("[data-testid=friend]").first().click();
+  await bob.locator("#chatAvatar").click();
+  await bob.locator("#blockUser").click();
+  await expect(bob.locator("#blockUser")).toHaveText("Tap again to block");
+  await bob.locator("#blockUser").click();
+
+  await openTab(bob, "friends");
+  await expect(bob.locator("[data-testid=friend]"), "gone for whoever blocked").toHaveCount(0);
+  await expect(
+    alice.locator("[data-testid=friend]"),
+    "and for whoever was blocked, without them reloading",
+  ).toHaveCount(0);
 });
 
 test("everything not yet chosen streams in one line, and picking moves it to the top", async ({

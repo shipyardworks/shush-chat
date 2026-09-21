@@ -22,6 +22,7 @@ import java.util.UUID;
         @JsonSubTypes.Type(value = ServerFrame.NoMatch.class, name = "noMatch"),
         @JsonSubTypes.Type(value = ServerFrame.FriendRequested.class, name = "friendRequested"),
         @JsonSubTypes.Type(value = ServerFrame.FriendRequestAccepted.class, name = "friendRequestAccepted"),
+        @JsonSubTypes.Type(value = ServerFrame.FriendshipEnded.class, name = "friendshipEnded"),
         @JsonSubTypes.Type(value = ServerFrame.Reaction.class, name = "reaction"),
         @JsonSubTypes.Type(value = ServerFrame.Deleted.class, name = "deleted")
 })
@@ -133,4 +134,17 @@ public sealed interface ServerFrame {
     record FriendRequestAccepted(UUID conversationId, UUID requestId, UUID byUserId)
             implements ServerFrame {
     }
+
+    /**
+     * The friendship is over, told to the person who did not do it.
+     *
+     * <p>Sent for both ways it can end -- removed, or blocked -- and deliberately says only
+     * that it ended. The server deletes the row either way, so this is the same fact the other
+     * client would read from {@code GET /api/friends} on its next load; without it that list
+     * went on showing a friend row for somebody who, in the blocking case, could no longer be
+     * reached at all. Which of the two happened is not said, because "you have been blocked"
+     * is not a thing this product tells anybody -- the same reason a declined request is
+     * silent.
+     */
+    record FriendshipEnded(UUID withUserId) implements ServerFrame {}
 }

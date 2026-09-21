@@ -145,7 +145,7 @@ class FriendRequestIT extends AbstractIT {
     }
 
     @Test
-    void blockingSomeoneRemovesTheFriendship() {
+    void blockingSomeoneRemovesTheFriendshipAndTellsThem() throws Exception {
         TestUsers.Session alice = testUsers.newAnonymous();
         TestUsers.Session bob = testUsers.newAnonymous();
         UUID conversationId = testUsers.createConversation(alice, bob);
@@ -155,13 +155,24 @@ class FriendRequestIT extends AbstractIT {
         post("/api/friend-requests/" + requestId + "/accept", null, bob);
         assertThat(friendIdsOf(alice)).contains(bob.userId().toString());
 
-        assertThat(post("/api/blocks/" + bob.userId(), null, alice).getStatusCode())
-                .isEqualTo(HttpStatus.OK);
+        try (WsClient bobWs = WsClient.connect(port, bob.jwt())) {
+            bobWs.await("hello");
+
+            assertThat(post("/api/blocks/" + bob.userId(), null, alice).getStatusCode())
+                    .isEqualTo(HttpStatus.OK);
+
+            // One row, two people: the friendship is gone for both of them, and only the one
+            // who blocked knew about it. Bob's friends list went on showing somebody who could
+            // no longer reach him at all until something else made that client reload.
+            JsonNode ended = bobWs.await("friendshipEnded");
+            assertThat(ended.path("withUserId").asText()).isEqualTo(alice.userId().toString());
+        }
 
         // Leaving the friendship in place would show someone you asked never to hear from again.
         assertThat(friendIdsOf(alice)).doesNotContain(bob.userId().toString());
         assertThat(friendIdsOf(bob)).doesNotContain(alice.userId().toString());
     }
+
 
     @Test
     void anInviteLinkOpensAConversationWithItsOwner() {
@@ -212,16 +223,26 @@ class FriendRequestIT extends AbstractIT {
      * without this there was no way out of that at all.
      */
     @Test
-    void removingAFriendUndoesTheExclusionThatBlocksMatching() {
+    void removingAFriendUndoesTheExclusionThatBlocksMatching() throws Exception {
         TestUsers.Session alice = testUsers.newAnonymous();
         TestUsers.Session bob = testUsers.newAnonymous();
         befriend(alice, bob);
 
         assertThat(friendIdsOf(alice)).containsExactly(bob.userId().toString());
 
-        assertThat(rest.exchange("/api/friends/" + bob.userId(), HttpMethod.DELETE,
-                new HttpEntity<>(testUsers.authorised(alice)), JsonNode.class).getStatusCode())
-                .isEqualTo(HttpStatus.OK);
+        try (WsClient bobWs = WsClient.connect(port, bob.jwt())) {
+            bobWs.await("hello");
+
+            assertThat(rest.exchange("/api/friends/" + bob.userId(), HttpMethod.DELETE,
+                    new HttpEntity<>(testUsers.authorised(alice)), JsonNode.class).getStatusCode())
+                    .isEqualTo(HttpStatus.OK);
+
+            // The row is one row for two people, and only the one who deleted it knew. Bob's
+            // friends list was left claiming a friendship that no longer existed until
+            // something else happened to make that client reload.
+            JsonNode ended = bobWs.await("friendshipEnded");
+            assertThat(ended.path("withUserId").asText()).isEqualTo(alice.userId().toString());
+        }
 
         assertThat(friendIdsOf(alice)).as("gone for the one who removed it").isEmpty();
         assertThat(friendIdsOf(bob)).as("and for the other one, since it was one row").isEmpty();

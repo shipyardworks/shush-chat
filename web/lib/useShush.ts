@@ -122,7 +122,6 @@ export const useShush = () => {
   const [items, setItems] = useState<ChatItem[]>([]);
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [peer, setPeer] = useState<Peer>({ userId: null, name: null, heading: "", sub: "" });
-  const [isFriendConversation, setIsFriendConversation] = useState(false);
   const [replyingTo, setReplyingTo] = useState<Message | null>(null);
   // Somebody walked out. The server decides this and says so in a frame; the client never
   // assumes it, which is exactly what went wrong when one side printed "You left" on its own.
@@ -378,7 +377,7 @@ export const useShush = () => {
   );
 
   const openConversation = useCallback(
-    (id: string, next: Peer, friendConversation: boolean, endedAlready = false) => {
+    (id: string, next: Peer, endedAlready = false) => {
       openedAt.current += 1;
       seen.current = new Set();
       optimistic.current = new Set();
@@ -388,7 +387,6 @@ export const useShush = () => {
       setConversationId(id);
       conversationRef.current = id;
       setPeer(next);
-      setIsFriendConversation(friendConversation);
       setReplyingTo(null);
       setFriendRequestSent(false);
       // The server already told us whether this one is over -- reopening one from history used
@@ -447,7 +445,6 @@ export const useShush = () => {
                 ? messages.peer.randomMatch
                 : messages.peer.sharedInterests(labels as string[]),
           },
-          withFriend,
         );
         void refreshLists();
         return;
@@ -625,6 +622,22 @@ export const useShush = () => {
         return;
       }
 
+      /**
+       * The other person removed you, or blocked you. Nothing is said about which, and nothing
+       * is said at all -- the lists simply become true again.
+       *
+       * <p>The conversation on screen follows from that on its own: whether this is a friend
+       * is read from the friends list, so the ask-to-keep button comes back here the same way
+       * it does for the person who acted.
+       */
+      if (type === "friendshipEnded") {
+        void refreshLists();
+        if (String(frame.withUserId) === peerRef.current.userId) {
+          setPeer((current) => ({ ...current, sub: "" }));
+        }
+        return;
+      }
+
       if (type === "error") {
         const clientMsgId = frame.clientMsgId ? String(frame.clientMsgId) : null;
         if (clientMsgId && optimistic.current.delete(clientMsgId)) {
@@ -756,6 +769,12 @@ export const useShush = () => {
   }, [openSocket, reloadConversations, reloadFriends, reloadRequests]);
 
   useEffect(() => {
+    // Cleared on the way in, not only set on the way out. `leaving` is what stops a socket
+    // being reopened behind a page that has gone, and it is a ref, so it survives the
+    // component -- mount, unmount, mount again and every openSocket from then on returns
+    // immediately, leaving an app that renders perfectly and hears nothing. That is bug 42's
+    // exact shape, and nothing on screen would have said so except the reconnecting line.
+    leaving.current = false;
     void start();
     return () => {
       leaving.current = true;
@@ -823,7 +842,6 @@ export const useShush = () => {
           heading: thread.peerName ?? "Someone",
           sub: thread.isFriend ? (thread.online ? "Online" : "Offline") : "",
         },
-        thread.isFriend,
         Boolean(thread.ended),
       );
       setHistoryLoading(true);
@@ -892,7 +910,10 @@ export const useShush = () => {
         peerId: conversation.peerId,
         peerName: conversation.peerName,
         online: friendsRef.current.find((f) => f.userId === conversation.peerId)?.online,
-        isFriend: conversation.kind === "friend",
+        // Who your friends are, not what this conversation was when it started. `kind` is set
+        // the moment a friendship is made and never unset, so reading it here opened a chat
+        // with somebody you had since removed as though they were still kept.
+        isFriend: friendsRef.current.some((f) => f.userId === conversation.peerId),
         ended: conversation.state === "ended",
       }),
     [openThread],
@@ -1193,10 +1214,9 @@ export const useShush = () => {
       await refreshLists();
       // Not thrown out of the conversation. Removing a friend ends the friendship, not the
       // history: they drop out of Friends and stay in Chats, and the thread on screen is still
-      // a thread. Marking it "not a friend conversation" is what brings Add friend back, so
-      // the whole thing is reversible from where you are standing.
+      // a thread. Add friend comes back on its own, because that is read from the friends list
+      // this just reloaded -- so the whole thing is reversible from where you are standing.
       if (peer.userId === userId) {
-        setIsFriendConversation(false);
         setPeer((current) => ({ ...current, sub: "" }));
       }
     },
@@ -1414,13 +1434,14 @@ export const useShush = () => {
   /**
    * Whether asking to keep this person is still a thing that makes sense.
    *
-   * <p>The flag alone was set when a thread was opened from the friends list, and a match is
-   * not opened from a list -- so now that the matcher no longer skips friends, being paired
-   * with one offered "Add friend" for somebody already kept. Deciding it from the friends list
-   * instead answers the question being asked, which is about the two people rather than about
-   * which row was clicked.
+   * <p>The friends list is the whole answer, and deliberately the only one. It used to be
+   * "either the friends list, or the flag this conversation was opened with" -- and that flag
+   * came from `conversations.kind`, which is set when a friendship is made and never unset.
+   * So a conversation with somebody you had removed as a friend still hid Add friend, offered
+   * no way out of itself, and said "Offline" underneath their name as though nothing had
+   * happened. The question is about the two people right now, not about how the thread began.
    */
-  const withAFriend = isFriendConversation || currentFriend !== null;
+  const withAFriend = currentFriend !== null;
 
   /** The quoted message a reply points at, when it is on screen. */
   const quotedFor = useCallback(
